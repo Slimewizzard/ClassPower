@@ -44,6 +44,13 @@ function PP_Debug(msg)
     end
 end
 
+-- Spell Durations (in seconds)
+PP_SpellDuration = {
+    ["Proclaim"] = 7200, -- 2 Hours
+    ["Grace"] = 1800,    -- 30 Minutes
+    ["Empower"] = 600,   -- 10 Minutes
+}
+
 function PriestPower_SlashCommandHandler(msg)
     if msg == "debug" then
         PP_DebugEnabled = not PP_DebugEnabled
@@ -70,6 +77,7 @@ function PriestPower_OnLoad()
     this:RegisterEvent("CHAT_MSG_ADDON")
     this:RegisterEvent("PARTY_MEMBERS_CHANGED")
     this:RegisterEvent("PLAYER_LOGIN")
+    this:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
     
     SlashCmdList["PRIESTPOWER"] = function(msg)
         PriestPower_SlashCommandHandler(msg)
@@ -107,12 +115,19 @@ function PriestPower_OnEvent(event)
         end
         
     elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
-        if IsPriest then PriestPower_ScanSpells() end
+        if IsPriest then 
+            PriestPower_ScanSpells() 
+            if event == "PLAYER_ENTERING_WORLD" then PriestPower_RequestSend() end
+        end
     elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
         PriestPower_ScanRaid()
         PriestPower_UpdateUI()
+    elseif event == "CHAT_MSG_SPELL_SELF_BUFF" then
+        PriestPower_ParseSpellMessage(arg1)
     elseif event == "CHAT_MSG_ADDON" then
-        PriestPower_ParseMessage(arg1, arg2, arg4)
+        if arg1 == PP_PREFIX then
+            PriestPower_ParseMessage(arg4, arg2)
+        end
     end
 end
 
@@ -241,24 +256,22 @@ function PriestPower_UpdateBuffBar()
         getglobal(btnP:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Proclaim"])
         getglobal(btnG:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Grace"])
         getglobal(btnE:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Empower"])
+        -- Helper Timer Function
+        local function GetTimerText(key)
+             if PP_BuffTimers[target] and PP_BuffTimers[target][key] then
+                 local rem = PP_BuffTimers[target][key] - time()
+                 if rem > 3600 then return math.ceil(rem/3600).."h"
+                 elseif rem > 60 then return math.ceil(rem/60).."m"
+                 elseif rem > 0 then return math.ceil(rem).."s"
+                 end
+             end
+             return ""
+        end
+
         -- Proclaim
         if status and status.hasProclaim then
              btnP:SetAlpha(1.0)
-             
-             local text = ""
-             if PP_BuffTimers[target] then
-                 local rem = PP_BuffTimers[target] - time()
-                 if rem > 3600 then
-                     text = math.ceil(rem/3600).."h"
-                 elseif rem > 60 then
-                     text = math.ceil(rem/60).."m"
-                 elseif rem > 0 then
-                     text = math.ceil(rem).."s"
-                 else
-                     text = "0s"
-                 end
-             end
-             getglobal(btnP:GetName().."Text"):SetText(text)
+             getglobal(btnP:GetName().."Text"):SetText(GetTimerText("Proclaim"))
         else
              btnP:SetAlpha(1.0)
              getglobal(btnP:GetName().."Text"):SetText("|cffff0000X|r") -- Red X if missing
@@ -272,21 +285,23 @@ function PriestPower_UpdateBuffBar()
         if status then 
             if status.hasGrace then
                 btnG:Show(); btnG:SetAlpha(1.0)
+                getglobal(btnG:GetName().."Text"):SetText(GetTimerText("Grace"))
                 btnE:Hide()
             elseif status.hasEmpower then
                 btnG:Hide()
                 btnE:Show(); btnE:SetAlpha(1.0)
                 -- Move Empower to Grace's spot
                 btnE:ClearAllPoints(); btnE:SetPoint("LEFT", btnP, "RIGHT", 0, 0)
+                getglobal(btnE:GetName().."Text"):SetText(GetTimerText("Empower"))
             else
                 -- Neither active: Show both faded
-                btnG:Show(); btnG:SetAlpha(0.4)
-                btnE:Show(); btnE:SetAlpha(0.4)
+                btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
+                btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
             end
         else
              -- No status (target invalid/far/dead?), show faded?
-             btnG:Show(); btnG:SetAlpha(0.4)
-             btnE:Show(); btnE:SetAlpha(0.4)
+             btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
+             btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
         end
     end
     
@@ -404,13 +419,23 @@ function PriestPower_ScanRaid()
             
             -- Timer Logic
             if not PP_BuffTimers then PP_BuffTimers = {} end
+            if not PP_BuffTimers[name] then PP_BuffTimers[name] = {} end
+            local timers = PP_BuffTimers[name]
+            
+            -- Proclaim
             if buffInfo.hasProclaim then
-                if not PP_BuffTimers[name] then
-                    PP_BuffTimers[name] = time() + 7200 -- 2 Hours
+                if not timers["Proclaim"] then
+                    timers["Proclaim"] = time() + 7200 -- Fallback default
                 end
             else
-                PP_BuffTimers[name] = nil
+                timers["Proclaim"] = nil
             end
+            
+            -- Grace - Only clear if gone, set by combat log
+            if not buffInfo.hasGrace then timers["Grace"] = nil end
+            
+            -- Empower - Only clear if gone, set by combat log
+            if not buffInfo.hasEmpower then timers["Empower"] = nil end
             
             table.insert(CurrentBuffs[subgroup], buffInfo)
             CurrentBuffsByName[name] = buffInfo
@@ -541,6 +566,37 @@ function PriestPower_ParseMessage(sender, msg)
             if target == "nil" or target == "" then target = nil end
             PriestPower_LegacyAssignments[name] = PriestPower_LegacyAssignments[name] or {}
             PriestPower_LegacyAssignments[name]["Champ"] = target
+             PriestPower_UpdateUI()
+        end
+    end
+end
+
+function PriestPower_ParseSpellMessage(msg)
+    if not msg then return end
+    
+    -- Format: You cast Spell on Target.
+    local _, _, spell, target = string.find(msg, "^You cast (.*) on (.*)%.$")
+    
+    if spell and target then
+        local duration = nil
+        local key = nil
+        
+        if spell == "Champion's Grace" then
+            key = "Grace"
+            duration = PP_SpellDuration["Grace"]
+        elseif spell == "Empower Champion" then
+            key = "Empower"
+            duration = PP_SpellDuration["Empower"]
+        elseif spell == "Proclaim Champion" then
+             key = "Proclaim"
+             duration = PP_SpellDuration["Proclaim"]
+        end
+        
+        if key and duration then
+             if not PP_BuffTimers then PP_BuffTimers = {} end
+             if not PP_BuffTimers[target] then PP_BuffTimers[target] = {} end
+             
+             PP_BuffTimers[target][key] = time() + duration
              PriestPower_UpdateUI()
         end
     end
