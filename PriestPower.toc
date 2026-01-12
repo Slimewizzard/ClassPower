@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: PriestPower
+## Notes: A priest addon for Turtle WoW (1.12.1)
+## Author: User
+## Version: 1.0
+## SavedVariables: PriestPowerDB
+
+PriestPower.lua
