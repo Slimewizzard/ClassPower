@@ -149,15 +149,18 @@ function PriestPower_ScanSpells()
     -- Consider broadcasting self here or waiting for REQ
 end
 
+CurrentBuffsByName = {}
+
 function PriestPower_ScanRaid()
     if not IsPriest then return end
     
-    -- Reset CurrentBuffs: Index 1-8 for groups
+    -- Reset
     CurrentBuffs = {}
     for i=1, 8 do CurrentBuffs[i] = {} end
+    CurrentBuffsByName = {}
     
     local numRaid = GetNumRaidMembers()
-    if numRaid == 0 then return end -- Only Raid logic supported for Groups 1-8 for now
+    if numRaid == 0 then return end 
 
     for i = 1, numRaid do
         local unit = "raid"..i
@@ -170,7 +173,10 @@ function PriestPower_ScanRaid()
                 visible = UnitIsVisible(unit),
                 dead = UnitIsDeadOrGhost(unit),
                 hasFort = false,
-                hasSpirit = false
+                hasSpirit = false,
+                hasProclaim = false,
+                hasGrace = false,
+                hasEmpower = false
             }
             
             -- Check Buffs
@@ -182,10 +188,15 @@ function PriestPower_ScanRaid()
                 if string.find(bname, "Fortitude") then buffInfo.hasFort = true end
                 if string.find(bname, "Spirit") or string.find(bname, "Inspiration") then buffInfo.hasSpirit = true end
                 
+                if string.find(bname, "Proclaim Champion") or string.find(bname, "Holy Champion") then buffInfo.hasProclaim = true end
+                if string.find(bname, "Champion's Grace") then buffInfo.hasGrace = true end
+                if string.find(bname, "Empower Champion") then buffInfo.hasEmpower = true end
+                
                 b = b + 1
             end
             
             table.insert(CurrentBuffs[subgroup], buffInfo)
+            CurrentBuffsByName[name] = buffInfo
         end
     end
 end
@@ -377,22 +388,70 @@ function PriestPower_UpdateUI()
                 end
             end
             
-            -- Champion Button logic remains same
-            local champIcon = getglobal(frame:GetName().."ChampIcon")
+            -- Champion Button Cluster
+            local champFrame = getglobal(frame:GetName().."Champ")
+            local btnP = getglobal(champFrame:GetName().."Proclaim")
+            local btnG = getglobal(champFrame:GetName().."Grace")
+            local btnE = getglobal(champFrame:GetName().."Empower")
             
-            if not champIcon then
-                -- PP_Debug("Could not find icon: " .. frame:GetName().."ChampIcon")
-            else
-                local champTarget = nil
-                if PriestPower_LegacyAssignments[name] then
-                     champTarget = PriestPower_LegacyAssignments[name]["Champ"]
-                end
-                if champTarget then
-                    champIcon:SetTexture(PriestPower_ChampionIcons["Proclaim"])
-                    champIcon:Show()
+            local iconP = getglobal(btnP:GetName().."Icon")
+            local iconG = getglobal(btnG:GetName().."Icon")
+            local iconE = getglobal(btnE:GetName().."Icon")
+            
+            local champText = getglobal(frame:GetName().."ChampName")
+
+            -- Get Trigger (Assignment)
+            local champTarget = nil
+            if PriestPower_LegacyAssignments[name] then
+                 champTarget = PriestPower_LegacyAssignments[name]["Champ"]
+            end
+            
+            -- Set Icons
+            iconP:SetTexture(PriestPower_ChampionIcons["Proclaim"])
+            iconG:SetTexture(PriestPower_ChampionIcons["Grace"])
+            iconE:SetTexture(PriestPower_ChampionIcons["Empower"])
+            
+            if champTarget then
+                if champText then champText:SetText(champTarget) end
+                
+                -- Check Status in CurrentBuffsByName
+                local status = CurrentBuffsByName[champTarget]
+                
+                -- Proclaim
+                iconP:Show()
+                if status and status.hasProclaim then
+                     btnP:SetAlpha(1.0)
+                     getglobal(btnP:GetName().."Text"):SetText("")
                 else
-                    champIcon:Hide()
+                     btnP:SetAlpha(1.0)
+                     getglobal(btnP:GetName().."Text"):SetText("|cffff0000X|r") -- Red X if missing
                 end
+
+                -- Grace
+                iconG:Show()
+                if status and status.hasGrace then
+                     btnG:SetAlpha(1.0)
+                     getglobal(btnG:GetName().."Text"):SetText("")
+                else
+                     btnG:SetAlpha(0.6) -- Needs refresh?
+                     -- getglobal(btnG:GetName().."Text"):SetText("|cffff0000X|r")
+                     getglobal(btnG:GetName().."Text"):SetText("")
+                end
+                
+                -- Empower
+                iconE:Show()
+                if status and status.hasEmpower then
+                     btnE:SetAlpha(1.0)
+                     getglobal(btnE:GetName().."Text"):SetText("")
+                else
+                     btnE:SetAlpha(0.6)
+                     getglobal(btnE:GetName().."Text"):SetText("")
+                end
+            else
+                if champText then champText:SetText("") end
+                iconP:Hide()
+                iconG:Hide()
+                iconE:Hide()
             end
         end
         i = i + 1
@@ -448,24 +507,96 @@ function PriestPowerSubButton_OnEnter(btn)
      GameTooltip:Show()
 end
 
+-- Context for Dropdown (Which priest are we assigning for?)
+PriestPower_ContextName = nil
+
 function PriestPowerChampButton_OnClick(btn)
-    local _, _, pid = string.find(btn:GetName(), "PriestPowerFramePlayer(%d+)")
+    local grandParent = btn:GetParent():GetParent() -- PriestPowerFramePlayerX
+    local _, _, pid = string.find(grandParent:GetName(), "Player(%d+)")
     pid = tonumber(pid)
-    local pname = getglobal("PriestPowerFramePlayer"..pid.."Name"):GetText()
     
-    if UnitExists("target") and UnitIsFriend("player", "target") and UnitIsPlayer("target") then
-        local targetName = UnitName("target")
-        PriestPower_LegacyAssignments[pname] = PriestPower_LegacyAssignments[pname] or {}
-        PriestPower_LegacyAssignments[pname]["Champ"] = targetName
-        
-        DEFAULT_CHAT_FRAME:AddMessage("Assigned Champion for "..pname..": "..targetName)
-        PriestPower_SendMessage("ASSIGNCHAMP "..pname.." "..targetName)
-    else
+    local pname = getglobal("PriestPowerFramePlayer"..pid.."Name"):GetText()
+    PriestPower_ContextName = pname
+    
+    ToggleDropDownMenu(1, nil, PriestPowerChampDropDown, btn:GetName(), 0, 0)
+end
+
+function PriestPower_AssignChamp_OnClick()
+    local targetName = this.value
+    local pname = PriestPower_ContextName
+    
+    if not pname then return end
+    
+    if targetName == "CLEAR" then
         PriestPower_LegacyAssignments[pname] = PriestPower_LegacyAssignments[pname] or {}
         PriestPower_LegacyAssignments[pname]["Champ"] = nil
+        DEFAULT_CHAT_FRAME:AddMessage("Cleared Champion for "..pname)
         PriestPower_SendMessage("ASSIGNCHAMP "..pname.." nil")
+    else
+        PriestPower_LegacyAssignments[pname] = PriestPower_LegacyAssignments[pname] or {}
+        PriestPower_LegacyAssignments[pname]["Champ"] = targetName
+        DEFAULT_CHAT_FRAME:AddMessage("Assigned Champion for "..pname..": "..targetName)
+        PriestPower_SendMessage("ASSIGNCHAMP "..pname.." "..targetName)
     end
+    
     PriestPower_UpdateUI()
+    CloseDropDownMenus()
+end
+
+function PriestPower_ChampDropDown_Initialize()
+    local info = {}
+    
+    -- Option to Clear
+    info = {}
+    info.text = ">> Clear Assignment <<"
+    info.value = "CLEAR"
+    info.func = PriestPower_AssignChamp_OnClick
+    UIDropDownMenu_AddButton(info)
+    
+    -- List Raid Members
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        -- Sort or Group logic could go here, for now flat list
+        for i = 1, numRaid do
+            local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
+            if name then
+                info = {}
+                info.text = "["..subgroup.."] "..name.." ("..class..")"
+                info.value = name
+                info.func = PriestPower_AssignChamp_OnClick
+                
+                -- Check Checked
+                if PriestPower_ContextName and PriestPower_LegacyAssignments[PriestPower_ContextName] and 
+                   PriestPower_LegacyAssignments[PriestPower_ContextName]["Champ"] == name then
+                    info.checked = 1
+                end
+                
+                UIDropDownMenu_AddButton(info)
+            end
+        end
+    else
+        -- If in party (Debug/5-man)
+        local numParty = GetNumPartyMembers()
+        if numParty > 0 then
+             -- Add Player
+             info = {}
+             info.text = UnitName("player")
+             info.value = UnitName("player")
+             info.func = PriestPower_AssignChamp_OnClick
+             UIDropDownMenu_AddButton(info)
+             
+             for i=1, numParty do
+                 local name = UnitName("party"..i)
+                 if name then
+                     info = {}
+                     info.text = name
+                     info.value = name
+                     info.func = PriestPower_AssignChamp_OnClick
+                     UIDropDownMenu_AddButton(info)
+                 end
+             end
+        end
+    end
 end
 
 function PriestPower_SlashCommandHandler(msg)

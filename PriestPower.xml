@@ -64,9 +64,74 @@
         </Frames>
     </Frame>
     
+    <!-- Champion Container (Holds Proclaim + Grace + Empower) -->
+    <Frame name="PriestPowerChampionTemplate" virtual="true">
+        <Size>
+            <AbsDimension x="80" y="42"/>
+        </Size>
+        <Backdrop bgFile="Interface\Tooltips\UI-Tooltip-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <EdgeSize><AbsValue val="8"/></EdgeSize>
+            <TileSize><AbsValue val="8"/></TileSize>
+            <BackgroundInsets><AbsInset left="1" right="1" top="1" bottom="1"/></BackgroundInsets>
+        </Backdrop>
+        <Frames>
+            <!-- 3 Small Buttons -->
+            <Button name="$parentProclaim" inherits="PriestPowerSubButtonTemplate">
+                <Anchors>
+                    <Anchor point="LEFT"><Offset><AbsDimension x="2" y="0"/></Offset></Anchor>
+                </Anchors>
+                 <Scripts>
+                    <OnLoad>this:RegisterForClicks("LeftButtonUp", "RightButtonUp")</OnLoad>
+                    <OnClick>PriestPowerChampButton_OnClick(this)</OnClick>
+                    <OnEnter>
+                        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+                        GameTooltip:SetText(SPELL_PROCLAIM)
+                        GameTooltip:AddLine("Checks for Proclaim Champion or Holy Champion (Rank 3)")
+                        GameTooltip:Show()
+                    </OnEnter>
+                    <OnLeave>GameTooltip:Hide()</OnLeave>
+                </Scripts>
+            </Button>
+            <Button name="$parentGrace" inherits="PriestPowerSubButtonTemplate">
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="$parentProclaim" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="0" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnLoad>this:RegisterForClicks("LeftButtonUp", "RightButtonUp")</OnLoad>
+                    <OnClick>PriestPowerChampButton_OnClick(this)</OnClick>
+                    <OnEnter>
+                        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+                        GameTooltip:SetText(SPELL_GRACE)
+                        GameTooltip:Show()
+                    </OnEnter>
+                    <OnLeave>GameTooltip:Hide()</OnLeave>
+                </Scripts>
+            </Button>
+            <Button name="$parentEmpower" inherits="PriestPowerSubButtonTemplate">
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="$parentGrace" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="0" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnLoad>this:RegisterForClicks("LeftButtonUp", "RightButtonUp")</OnLoad>
+                    <OnClick>PriestPowerChampButton_OnClick(this)</OnClick>
+                    <OnEnter>
+                        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+                        GameTooltip:SetText(SPELL_EMPOWER)
+                        GameTooltip:Show()
+                    </OnEnter>
+                    <OnLeave>GameTooltip:Hide()</OnLeave>
+                </Scripts>
+            </Button>
+        </Frames>
+    </Frame>
+    
     <Frame name="PriestPowerUserTemplate" hidden="false" virtual="true">
         <Size>
-            <AbsDimension x="800" y="56"/>
+            <AbsDimension x="900" y="56"/>
         </Size>
         <Layers>
             <Layer level="OVERLAY">
@@ -77,6 +142,16 @@
                     <Anchors>
                         <Anchor point="TOPLEFT">
                             <Offset><AbsDimension x="10" y="-15"/></Offset>
+                        </Anchor>
+                    </Anchors>
+                </FontString>
+                <FontString name="$parentChampName" inherits="GameFontHighlightSmall" text="Champion" justifyH="RIGHT">
+                     <Size>
+                        <AbsDimension x="80" y="16"/>
+                    </Size>
+                    <Anchors>
+                         <Anchor point="TOPLEFT">
+                            <Offset><AbsDimension x="600" y="-15"/></Offset>
                         </Anchor>
                     </Anchors>
                 </FontString>
@@ -94,26 +169,14 @@
             <Frame name="$parentGroup7" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup6" relativePoint="TOPRIGHT"/></Anchors></Frame>
             <Frame name="$parentGroup8" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup7" relativePoint="TOPRIGHT"/></Anchors></Frame>
             
-            <!-- Champion Assignment Button (Kept simplified grid button style for now, or just icon) -->
-            <Button name="$parentChamp" inherits="PriestPowerGridButtonTemplate">
+            <!-- Champion Assignment (3 Button Container) -->
+            <Frame name="$parentChamp" inherits="PriestPowerChampionTemplate">
                 <Anchors>
                     <Anchor point="TOPLEFT" relativeTo="$parentGroup8" relativePoint="TOPRIGHT">
-                        <Offset><AbsDimension x="20" y="5"/></Offset>
+                        <Offset><AbsDimension x="20" y="0"/></Offset>
                     </Anchor>
                 </Anchors>
-                <Scripts>
-                    <OnClick>
-                        PriestPowerChampButton_OnClick(this, arg1)
-                    </OnClick>
-                     <OnEnter>
-                        -- Add tooltip
-                        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-                        GameTooltip:SetText("Champion Assignment")
-                        GameTooltip:Show()
-                    </OnEnter>
-                    <OnLeave>GameTooltip:Hide()</OnLeave>
-                </Scripts>
-            </Button>
+            </Frame>
         </Frames>
     </Frame>
 
@@ -177,5 +240,14 @@
                 end
              </OnUpdate>
         </Scripts>
+    </Frame>
+
+    <Frame name="PriestPowerChampDropDown" inherits="UIDropDownMenuTemplate" id="1" hidden="true">
+        <Size>
+            <AbsDimension x="10" y="10"/>
+        </Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
     </Frame>
 </Ui>
