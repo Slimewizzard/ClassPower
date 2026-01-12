@@ -1,0 +1,181 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <Script file="localization.lua"/>
+    <Script file="PriestPower.lua"/>
+
+    <!-- Single Buff Button (Half Width) -->
+    <Button name="PriestPowerSubButtonTemplate" virtual="true">
+        <Size>
+            <AbsDimension x="25" y="40"/>
+        </Size>
+        <Layers>
+             <Layer level="BACKGROUND">
+                <Texture name="$parentBackground">
+                     <Color r="0.1" g="0.1" b="0.1" a="0.5"/>
+                </Texture>
+             </Layer>
+            <Layer level="OVERLAY">
+                <Texture name="$parentIcon">
+                    <Size>
+                        <AbsDimension x="20" y="20"/>
+                    </Size>
+                    <Anchors>
+                        <Anchor point="CENTER"/>
+                    </Anchors>
+                </Texture>
+                 <!-- Added Status Text -->
+                 <FontString name="$parentText" inherits="GameFontHighlightSmall" text="5/5" justifyH="CENTER">
+                     <Anchors>
+                        <Anchor point="BOTTOM"><Offset><AbsDimension x="0" y="2"/></Offset></Anchor>
+                     </Anchors>
+                 </FontString>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>this:RegisterForClicks("LeftButtonUp", "RightButtonUp")</OnLoad>
+            <OnClick>PriestPowerSubButton_OnClick(this)</OnClick>
+            <OnEnter>PriestPowerSubButton_OnEnter(this)</OnEnter>
+            <OnLeave>GameTooltip:Hide()</OnLeave>
+        </Scripts>
+    </Button>
+
+    <!-- Group Container (Holds Fort + Spirit) -->
+    <Frame name="PriestPowerGroupTemplate" virtual="true">
+        <Size>
+            <AbsDimension x="52" y="42"/>
+        </Size>
+        <Backdrop bgFile="Interface\Tooltips\UI-Tooltip-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+            <EdgeSize><AbsValue val="8"/></EdgeSize>
+            <TileSize><AbsValue val="8"/></TileSize>
+            <BackgroundInsets><AbsInset left="1" right="1" top="1" bottom="1"/></BackgroundInsets>
+        </Backdrop>
+        <Frames>
+            <Button name="$parentFort" inherits="PriestPowerSubButtonTemplate">
+                <Anchors>
+                    <Anchor point="LEFT"><Offset><AbsDimension x="1" y="0"/></Offset></Anchor>
+                </Anchors>
+            </Button>
+            <Button name="$parentSpirit" inherits="PriestPowerSubButtonTemplate">
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="$parentFort" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="0" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+            </Button>
+        </Frames>
+    </Frame>
+    
+    <Frame name="PriestPowerUserTemplate" hidden="false" virtual="true">
+        <Size>
+            <AbsDimension x="800" y="56"/>
+        </Size>
+        <Layers>
+            <Layer level="OVERLAY">
+                <FontString name="$parentName" inherits="GameFontHighlightSmall" text="PriestName" justifyH="LEFT">
+                    <Size>
+                        <AbsDimension x="100" y="16"/>
+                    </Size>
+                    <Anchors>
+                        <Anchor point="TOPLEFT">
+                            <Offset><AbsDimension x="10" y="-15"/></Offset>
+                        </Anchor>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        
+        <Frames>
+            <!-- 8 Group Buttons (Groups 1-8) -->
+            <Frame name="$parentGroup1" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="110" y="-5"/></Offset></Anchor></Anchors></Frame>
+            <Frame name="$parentGroup2" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup1" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup3" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup2" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup4" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup3" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup5" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup4" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup6" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup5" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup7" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup6" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            <Frame name="$parentGroup8" inherits="PriestPowerGroupTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="$parentGroup7" relativePoint="TOPRIGHT"/></Anchors></Frame>
+            
+            <!-- Champion Assignment Button (Kept simplified grid button style for now, or just icon) -->
+            <Button name="$parentChamp" inherits="PriestPowerGridButtonTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" relativeTo="$parentGroup8" relativePoint="TOPRIGHT">
+                        <Offset><AbsDimension x="20" y="5"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Scripts>
+                    <OnClick>
+                        PriestPowerChampButton_OnClick(this, arg1)
+                    </OnClick>
+                     <OnEnter>
+                        -- Add tooltip
+                        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+                        GameTooltip:SetText("Champion Assignment")
+                        GameTooltip:Show()
+                    </OnEnter>
+                    <OnLeave>GameTooltip:Hide()</OnLeave>
+                </Scripts>
+            </Button>
+        </Frames>
+    </Frame>
+
+    <Frame name="PriestPowerFrame" hidden="true" toplevel="true" frameStrata="MEDIUM" enableMouse="true" movable="true" parent="UIParent">
+        <Size>
+            <AbsDimension x="800" y="400"/>
+        </Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+            <EdgeSize>
+                <AbsValue val="32"/>
+            </EdgeSize>
+            <TileSize>
+                <AbsValue val="32"/>
+            </TileSize>
+            <BackgroundInsets>
+                <AbsInset left="11" right="12" top="12" bottom="11"/>
+            </BackgroundInsets>
+        </Backdrop>
+        <Frames>
+            <!-- Header or Class Icons Row could go here -->
+            
+            <!-- Rows for Priests (Dynamic? No, let's hardcode 5-8 rows for now or standard raid size) -->
+            <!-- PallyPower does this dynamically in Lua loop usually, by instantiating or hiding rows -->
+            <!-- We will define 5 rows for now -->
+            <Frame name="PriestPowerFramePlayer1" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-30"/></Offset></Anchor></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer2" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer1" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer3" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer2" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer4" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer3" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer5" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer4" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            
+            <Button name="$parentClose" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT"><Offset><AbsDimension x="-5" y="-5"/></Offset></Anchor>
+                </Anchors>
+            </Button>
+        </Frames>
+        <Scripts>
+             <OnLoad>
+                this:RegisterForDrag("LeftButton");
+                PriestPower_OnLoad();
+             </OnLoad>
+             <OnEvent>
+                PriestPower_OnEvent(event);
+             </OnEvent>
+             <OnDragStart>this:StartMoving()</OnDragStart>
+             <OnDragStop>this:StopMovingOrSizing()</OnDragStop>
+        </Scripts>
+    </Frame>
+    
+    <Frame name="PriestPowerBuffBar" hidden="false" toplevel="true" frameStrata="LOW" enableMouse="true" movable="true" parent="UIParent">
+         <Size>
+             <AbsDimension x="110" y="30"/>
+        </Size>
+        <Scripts>
+             <OnUpdate>
+                if (PriestPower_OnUpdate) then
+                    PriestPower_OnUpdate(arg1);
+                end
+             </OnUpdate>
+        </Scripts>
+    </Frame>
+</Ui>

@@ -3,6 +3,8 @@
 ## Notes: A priest addon for Turtle WoW (1.12.1)
 ## Author: User
 ## Version: 1.0
-## SavedVariables: PriestPowerDB
-
+## SavedVariables: PriestPowerDB, PriestPower_Assignments
+## SavedVariablesPerCharacter: PriestPower_Saved
+localization.lua
+PriestPower.xml
 PriestPower.lua
