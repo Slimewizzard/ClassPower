@@ -194,7 +194,8 @@ function PriestPower_UpdateBuffBar()
         local target = PriestPower_LegacyAssignments[pname]["Champ"]
         local status = CurrentBuffsByName[target]
         
-        getglobal("PriestPowerBuffBarChampName"):SetText(target)
+        local label = getglobal("PriestPowerBuffBarChampName")
+        if label then label:SetText(target) end
         
         local btnP = getglobal("PriestPowerBuffBarChampProclaim")
         local btnG = getglobal("PriestPowerBuffBarChampGrace")

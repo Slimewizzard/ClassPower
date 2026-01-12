@@ -73,6 +73,13 @@
             <TileSize><AbsValue val="8"/></TileSize>
             <BackgroundInsets><AbsInset left="1" right="1" top="1" bottom="1"/></BackgroundInsets>
         </Backdrop>
+        <Layers>
+            <Layer level="OVERLAY">
+                <FontString name="$parentName" inherits="GameFontNormalSmall" text="Champ" justifyH="CENTER">
+                    <Anchors><Anchor point="TOP"><Offset><AbsDimension x="0" y="8"/></Offset></Anchor></Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
         <Frames>
             <!-- 3 Small Buttons -->
             <Button name="$parentProclaim" inherits="PriestPowerSubButtonTemplate">
