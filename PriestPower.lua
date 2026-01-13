@@ -22,6 +22,7 @@ PriestPower_BuffIcon = {
     [1] = "Interface\\Icons\\Spell_Holy_DivineSpirit",
     [2] = "Interface\\Icons\\Spell_Shadow_AntiShadow",
     [3] = "Interface\\Icons\\Spell_Holy_ProclaimChampion", 
+    [4] = "Interface\\Icons\\Spell_Holy_MindVision", -- Enlighten
 }
 
 -- Icons for the "Special" champion spells
@@ -29,6 +30,8 @@ PriestPower_ChampionIcons = {
     ["Proclaim"] = "Interface\\Icons\\Spell_Holy_ProclaimChampion",
     ["Grace"] = "Interface\\Icons\\Spell_Holy_ChampionsGrace",
     ["Empower"] = "Interface\\Icons\\Spell_Holy_EmpowerChampion",
+    ["Revive"] = "Interface\\Icons\\Spell_Holy_Resurrection",
+    ["Enlighten"] = "Interface\\Icons\\Spell_Holy_MindVision",
 }
 
 AllPriests = {}
@@ -82,7 +85,7 @@ function PriestPower_OnLoad()
     SlashCmdList["PRIESTPOWER"] = function(msg)
         PriestPower_SlashCommandHandler(msg)
     end
-    SLASH_PRIESTPOWER1 = "/pp" 
+    SLASH_PRIESTPOWER1 = "/prip" 
     SLASH_PRIESTPOWER2 = "/priestpower"
     SLASH_PRIESTPOWER3 = "/prp"
 
@@ -122,7 +125,14 @@ function PriestPower_OnEvent(event)
     elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
         PriestPower_ScanRaid()
         PriestPower_UpdateUI()
-        if event == "RAID_ROSTER_UPDATE" then PriestPower_RequestSend() end
+        
+        if event == "RAID_ROSTER_UPDATE" then 
+            if not PP_LastRequest then PP_LastRequest = 0 end
+            if GetTime() - PP_LastRequest > 5 then
+                PriestPower_RequestSend()
+                PP_LastRequest = GetTime()
+            end
+        end
     elseif event == "CHAT_MSG_SPELL_SELF_BUFF" then
         PriestPower_ParseSpellMessage(arg1)
     elseif event == "CHAT_MSG_ADDON" then
@@ -134,6 +144,7 @@ end
 
 -- Global timer for UI refresh
 PP_UpdateTimer = 0
+PP_LastRequest = 0
 
 function PriestPower_OnUpdate(elapsed)
     if not PP_PerUser then return end
@@ -344,7 +355,8 @@ function PriestPower_ScanSpells()
         ["Proclaim"] = false,
         ["Grace"] = false,
         ["Empower"] = false,
-        ["Revive"] = false
+        ["Revive"] = false,
+        ["Enlighten"] = false
     }
     
     local i = 1
@@ -381,10 +393,11 @@ function PriestPower_ScanSpells()
         end
         
         -- Champion Spells
-        if spellName == SPELL_PROCLAIM then RankInfo["Proclaim"] = true end
+        if spellName == SPELL_PROCLAIM or spellName == "Holy Champion" then RankInfo["Proclaim"] = true end
         if spellName == SPELL_GRACE then RankInfo["Grace"] = true end
         if spellName == SPELL_EMPOWER then RankInfo["Empower"] = true end
         if spellName == SPELL_REVIVE then RankInfo["Revive"] = true end
+        if spellName == SPELL_ENLIGHTEN then RankInfo["Enlighten"] = true end
         
         i = i + 1
     end
@@ -404,16 +417,36 @@ function PriestPower_ScanRaid()
     CurrentBuffsByName = {}
     
     local numRaid = GetNumRaidMembers()
-    if numRaid == 0 then return end 
-
-    for i = 1, numRaid do
-        local unit = "raid"..i
-        local name, _, subgroup = GetRaidRosterInfo(i)
-        
-        if name and subgroup and subgroup >= 1 and subgroup <= 8 then
+    local numParty = GetNumPartyMembers()
+    
+    local foundPriests = {}
+    if UnitClass("player") == "Priest" then
+        foundPriests[UnitName("player")] = true
+    end
+    
+    -- Helper to process unit
+    local function ProcessUnit(unit, name, subgroup, class)
+         if name and class == "PRIEST" then
+             foundPriests[name] = true
+             if not AllPriests[name] then
+                 -- Initialize with empty/defaults if new
+                 AllPriests[name] = {
+                    [0] = { rank = 0, talent = 0, name = "Fortitude" },
+                    [1] = { rank = 0, talent = 0, name = "Spirit" },
+                    [2] = { rank = 0, talent = 0, name = "Shadow" },
+                    ["Proclaim"] = false,
+                    ["Grace"] = false,
+                    ["Empower"] = false,
+                    ["Revive"] = false,
+                    ["Enlighten"] = false
+                 }
+             end
+         end
+    
+         if name and subgroup and subgroup >= 1 and subgroup <= 8 then
             local buffInfo = {
                 name = name,
-                class = UnitClass(unit),
+                class = class,
                 visible = UnitIsVisible(unit),
                 dead = UnitIsDeadOrGhost(unit),
                 hasFort = false,
@@ -459,8 +492,37 @@ function PriestPower_ScanRaid()
             -- Empower - Only clear if gone, set by combat log
             if not buffInfo.hasEmpower then timers["Empower"] = nil end
             
+            if not CurrentBuffs[subgroup] then CurrentBuffs[subgroup] = {} end
             table.insert(CurrentBuffs[subgroup], buffInfo)
             CurrentBuffsByName[name] = buffInfo
+        end
+    end
+
+    if numRaid > 0 then
+        for i = 1, numRaid do
+            local unit = "raid"..i
+            local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
+            ProcessUnit(unit, name, subgroup, class)
+        end
+    elseif numParty > 0 then
+         -- Party handling
+         for i = 1, numParty do
+             local unit = "party"..i
+             local name = UnitName(unit)
+             local _, class = UnitClass(unit)
+             ProcessUnit(unit, name, 1, class)
+         end
+         -- Process self for party
+         local _, pClass = UnitClass("player")
+         ProcessUnit("player", UnitName("player"), 1, pClass)
+    end
+    
+    -- Start cleanup of left priests
+    for name, _ in pairs(AllPriests) do
+        if not foundPriests[name] then
+             AllPriests[name] = nil
+             PriestPower_Assignments[name] = nil
+             -- Keep legacy?
         end
     end
 end
@@ -500,6 +562,7 @@ function PriestPower_SendSelf()
     msg = msg .. (myRanks["Grace"] and "1" or "0")
     msg = msg .. (myRanks["Empower"] and "1" or "0")
     msg = msg .. (myRanks["Revive"] and "1" or "0")
+    msg = msg .. (myRanks["Enlighten"] and "1" or "0")
     
     msg = msg .. "@"
     
@@ -523,13 +586,8 @@ function PriestPower_SendSelf()
     PriestPower_SendMessage(msg)
 end
 
-function PriestPower_SendMessage(msg)
-    if GetNumRaidMembers() > 0 then
-        SendAddonMessage(PP_PREFIX, msg, "RAID")
-    else
-        SendAddonMessage(PP_PREFIX, msg, "PARTY")
-    end
-end
+-- Protocol: SELF <ranks>@<assigns>@<champ>
+-- ranks: FSR pger e (Fort Spirit Shadow Proclaim Grace Empower Revive Enlighten)
 
 function PriestPower_ParseMessage(sender, msg)
     if sender == UnitName("player") then return end 
@@ -556,6 +614,7 @@ function PriestPower_ParseMessage(sender, msg)
         info["Grace"]    = (string.sub(ranks, 8, 8) == "1")
         info["Empower"]  = (string.sub(ranks, 9, 9) == "1")
         info["Revive"]   = (string.sub(ranks, 10, 10) == "1")
+        info["Enlighten"] = (string.sub(ranks, 11, 11) == "1")
         
         PriestPower_Assignments[sender] = PriestPower_Assignments[sender] or {}
         for gid = 1, 8 do
@@ -635,6 +694,108 @@ function PriestPower_UpdateUI()
         if frame then
             frame:Show()
             getglobal(frame:GetName().."Name"):SetText(name)
+            
+            -- Capability Icons (Learned Spells)
+            local capFrame = getglobal(frame:GetName().."Cap")
+            
+            local function UpdateCapIcon(key, icon, rank, talent, isBool)
+                local btn = getglobal(capFrame:GetName()..key)
+                local tex = getglobal(btn:GetName().."Icon")
+                local txt = getglobal(btn:GetName().."Rank")
+                
+                tex:SetTexture(icon)
+                
+                local hasSpell = false
+                local rankText = ""
+                
+                if isBool then
+                    if info[key] then hasSpell = true end
+                else
+                    -- Indexed (0,1,2)
+                    if info[key] and info[key].rank > 0 then 
+                        hasSpell = true 
+                        if info[key].talent > 0 then
+                            rankText = "+" -- Talent/Imp
+                        end
+                        -- rankText = rankText .. info[key].rank
+                    end
+                end
+                
+                if hasSpell then
+                    tex:SetDesaturated(0)
+                    btn:SetAlpha(1.0)
+                    txt:SetText(rankText)
+                    btn.tooltipText = key .. (rankText ~= "" and " (Talented)" or "")
+                else
+                    tex:SetDesaturated(1)
+                    btn:SetAlpha(0.4)
+                    txt:SetText("")
+                    btn.tooltipText = key .. " (Not Learned)"
+                end
+            end
+            
+            -- Fort (0)
+            -- Override to use correct index check since function is generic
+            local rInfo = info[0] or {rank=0, talent=0}
+            local btn = getglobal(capFrame:GetName().."Fort")
+            local tex = getglobal(btn:GetName().."Icon")
+            local txt = getglobal(btn:GetName().."Rank")
+            tex:SetTexture(PriestPower_BuffIcon[0])
+            btn.tooltipText = "Power Word: Fortitude"
+            if rInfo.rank > 0 then
+                tex:SetDesaturated(0); btn:SetAlpha(1.0)
+                txt:SetText(rInfo.talent > 0 and "+" or "")
+            else 
+                tex:SetDesaturated(1); btn:SetAlpha(0.4); txt:SetText("") 
+            end
+
+            -- Spirit (1)
+            rInfo = info[1] or {rank=0, talent=0}
+            btn = getglobal(capFrame:GetName().."Spirit")
+            tex = getglobal(btn:GetName().."Icon")
+            txt = getglobal(btn:GetName().."Rank")
+            tex:SetTexture(PriestPower_BuffIcon[1])
+            btn.tooltipText = "Divine Spirit"
+            if rInfo.rank > 0 then
+                 tex:SetDesaturated(0); btn:SetAlpha(1.0)
+                 txt:SetText(rInfo.talent > 0 and "+" or "")
+            else 
+                 tex:SetDesaturated(1); btn:SetAlpha(0.4); txt:SetText("") 
+            end
+
+            -- Shadow (2)
+            rInfo = info[2] or {rank=0, talent=0}
+            btn = getglobal(capFrame:GetName().."Shadow")
+            tex = getglobal(btn:GetName().."Icon")
+            txt = getglobal(btn:GetName().."Rank")
+            tex:SetTexture(PriestPower_BuffIcon[2])
+            btn.tooltipText = "Shadow Protection"
+            if rInfo.rank > 0 then
+                 tex:SetDesaturated(0); btn:SetAlpha(1.0)
+                 txt:SetText(rInfo.talent > 0 and "+" or "")
+            else 
+                 tex:SetDesaturated(1); btn:SetAlpha(0.4); txt:SetText("") 
+            end
+            
+            -- Champions & Enlighten (Bool)
+            local function SetBoolCap(key, iconName, label)
+                local b = getglobal(capFrame:GetName()..key)
+                local t = getglobal(b:GetName().."Icon")
+                t:SetTexture(PriestPower_ChampionIcons[iconName])
+                b.tooltipText = label
+                if info[iconName] then
+                    t:SetDesaturated(0); b:SetAlpha(1.0)
+                else
+                    t:SetDesaturated(1); b:SetAlpha(0.4)
+                end
+            end
+            
+            SetBoolCap("Proclaim", "Proclaim", SPELL_PROCLAIM)
+            SetBoolCap("Grace", "Grace", SPELL_GRACE)
+            SetBoolCap("Empower", "Empower", SPELL_EMPOWER)
+            SetBoolCap("Revive", "Revive", SPELL_REVIVE)
+            SetBoolCap("Enlighten", "Enlighten", SPELL_ENLIGHTEN)
+            
             
             -- Group Buttons (1-8)
             for gid = 1, 8 do

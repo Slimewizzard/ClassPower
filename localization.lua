@@ -29,6 +29,7 @@ SPELL_PROCLAIM = "Proclaim Champion"
 SPELL_GRACE = "Champion's Grace"
 SPELL_EMPOWER = "Empower Champion"
 SPELL_REVIVE = "Revive Champion"
+SPELL_ENLIGHTEN = "Enlighten"
 
 PriestPower_Credits1 = "Created by User"
 PriestPower_Credits2 = "Based on PallyPower by Relar"

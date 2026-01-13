@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: PriestPower
 ## Notes: A priest addon for Turtle WoW (1.12.1)
-## Author: User
+## Author: Slimewizzard
 ## Version: 1.0
 ## SavedVariablesPerCharacter: PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser
 localization.lua
