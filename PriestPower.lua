@@ -122,6 +122,7 @@ function PriestPower_OnEvent(event)
     elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
         PriestPower_ScanRaid()
         PriestPower_UpdateUI()
+        if event == "RAID_ROSTER_UPDATE" then PriestPower_RequestSend() end
     elseif event == "CHAT_MSG_SPELL_SELF_BUFF" then
         PriestPower_ParseSpellMessage(arg1)
     elseif event == "CHAT_MSG_ADDON" then
@@ -131,14 +132,35 @@ function PriestPower_OnEvent(event)
     end
 end
 
+-- Global timer for UI refresh
+PP_UpdateTimer = 0
+
 function PriestPower_OnUpdate(elapsed)
     if not PP_PerUser then return end
-    -- Stub for now, can handle timers later
+    
+    -- Scan Logic
     PP_NextScan = PP_NextScan - elapsed
     if PP_NextScan <= 0 then
         PP_NextScan = PP_PerUser.scanfreq
         PriestPower_ScanRaid()
-        PriestPower_UpdateUI()
+        -- PriestPower_UpdateUI() -- Moved to 1s timer below or keep?
+        -- ScanRaid updates data, UI updates visual.
+    end
+    
+    -- UI Refresh Logic (1s interval)
+    PP_UpdateTimer = PP_UpdateTimer - elapsed
+    if PP_UpdateTimer <= 0 then
+        PP_UpdateTimer = 1.0
+        
+        -- Refresh Buff Bar for Timers
+        if PriestPowerBuffBar:IsVisible() then
+            PriestPower_UpdateBuffBar() 
+        end
+        
+        -- Refresh Main Frame if visible (for status updates)
+        if PriestPowerFrame:IsVisible() then
+            PriestPower_UpdateUI()
+        end
     end
 end
 
@@ -544,7 +566,7 @@ function PriestPower_ParseMessage(sender, msg)
         end
         
         PriestPower_LegacyAssignments[sender] = PriestPower_LegacyAssignments[sender] or {}
-        if champ and champ ~= "" then
+        if champ and champ ~= "" and champ ~= "nil" then
             PriestPower_LegacyAssignments[sender]["Champ"] = champ
         else
             PriestPower_LegacyAssignments[sender]["Champ"] = nil
@@ -553,7 +575,7 @@ function PriestPower_ParseMessage(sender, msg)
         -- PriestPower_UpdateUI()
         
     elseif string.find(msg, "^ASSIGN ") then
-        local _, _, name, class, skill = string.find(msg, "^ASSIGN (.*) (.*) (.*)")
+        local _, _, name, class, skill = string.find(msg, "^ASSIGN (.-) (.-) (.*)")
         if name and class and skill then
             PriestPower_Assignments[name] = PriestPower_Assignments[name] or {}
             PriestPower_Assignments[name][tonumber(class)] = tonumber(skill)
@@ -561,7 +583,7 @@ function PriestPower_ParseMessage(sender, msg)
         end
         
     elseif string.find(msg, "^ASSIGNCHAMP ") then
-        local _, _, name, target = string.find(msg, "^ASSIGNCHAMP (.*) (.*)")
+        local _, _, name, target = string.find(msg, "^ASSIGNCHAMP (.-) (.*)")
         if name and target then
             if target == "nil" or target == "" then target = nil end
             PriestPower_LegacyAssignments[name] = PriestPower_LegacyAssignments[name] or {}
@@ -607,7 +629,7 @@ function PriestPower_UpdateUI()
     if not PriestPower_LegacyAssignments then PriestPower_LegacyAssignments = {} end
     local i = 1
     for name, info in pairs(AllPriests) do
-        if i > 5 then break end 
+        if i > 10 then break end 
         
         local frame = getglobal("PriestPowerFramePlayer"..i)
         if frame then
@@ -752,7 +774,7 @@ function PriestPower_UpdateUI()
         i = i + 1
     end
     
-    for k = i, 5 do getglobal("PriestPowerFramePlayer"..k):Hide() end
+    for k = i, 10 do getglobal("PriestPowerFramePlayer"..k):Hide() end
     
     PriestPower_UpdateBuffBar()
 end

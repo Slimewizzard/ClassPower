@@ -4,7 +4,7 @@
     <!-- Single Buff Button (Half Width) -->
     <Button name="PriestPowerSubButtonTemplate" virtual="true">
         <Size>
-            <AbsDimension x="25" y="40"/>
+            <AbsDimension x="24" y="24"/>
         </Size>
         <Layers>
              <Layer level="BACKGROUND">
@@ -215,6 +215,11 @@
             <Frame name="PriestPowerFramePlayer3" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer2" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
             <Frame name="PriestPowerFramePlayer4" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer3" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
             <Frame name="PriestPowerFramePlayer5" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer4" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer6" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer5" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer7" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer6" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer8" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer7" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer9" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer8" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
+            <Frame name="PriestPowerFramePlayer10" inherits="PriestPowerUserTemplate"><Anchors><Anchor point="TOPLEFT" relativeTo="PriestPowerFramePlayer9" relativePoint="BOTTOMLEFT"/></Anchors></Frame>
             
             <Button name="$parentClose" inherits="UIPanelCloseButton">
                 <Anchors>
