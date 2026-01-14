@@ -148,6 +148,16 @@ function PriestPower_SlashCommandHandler(msg)
             bar:SetScale(0.7)
         end
         DEFAULT_CHAT_FRAME:AddMessage("|cffffe00aPriestPower|r BuffBar reset to default position and scale.")
+    elseif msg == "checkbuffs" then
+        local unit = "player"
+        if UnitExists("target") then unit = "target" end
+        DEFAULT_CHAT_FRAME:AddMessage("Buffs on "..UnitName(unit)..":")
+        for i=1,32 do
+            local b = UnitBuff(unit, i)
+            if b then
+                DEFAULT_CHAT_FRAME:AddMessage(i..": "..b)
+            end
+        end
     else
         if PriestPowerFrame:IsVisible() then
             PriestPowerFrame:Hide()
@@ -281,7 +291,8 @@ function PriestPower_OnUpdate(elapsed)
         
         -- Refresh Buff Bar for Timers
         if PriestPowerBuffBar:IsVisible() then
-            PriestPower_UpdateBuffBar() 
+             PriestPower_ScanRaid() -- Update Buff Data (UnitBuffs) every second
+             PriestPower_UpdateBuffBar() 
         end
         
         -- Refresh Main Frame if visible (for status updates)
@@ -413,12 +424,18 @@ function PriestPower_ScanRaid()
                 local bname = UnitBuff(unit, b)
                 if not bname then break end
                 
-                if string.find(bname, "Fortitude") then buffInfo.hasFort = true end
-                if string.find(bname, "Spirit") or string.find(bname, "Inspiration") then buffInfo.hasSpirit = true end
+                -- Normalize to lowercase for safe matching
+                bname = string.lower(bname)
                 
-                if string.find(bname, "ProclaimChampion") or string.find(bname, "HolyChampion") then buffInfo.hasProclaim = true end
-                if string.find(bname, "ChampionsGrace") then buffInfo.hasGrace = true end
-                if string.find(bname, "EmpowerChampion") then buffInfo.hasEmpower = true end
+                if string.find(bname, "fortitude") then buffInfo.hasFort = true end
+                if string.find(bname, "spirit") or string.find(bname, "inspiration") then buffInfo.hasSpirit = true end
+                
+                -- Turtle WoW Custom Spells (Proclaim Champion, etc)
+                -- Standard icons might be used, or custom ones. 
+                -- We check for substrings known in the icon path.
+                if string.find(bname, "proclaimchampion") or string.find(bname, "holychampion") then buffInfo.hasProclaim = true end
+                if string.find(bname, "championsgrace") then buffInfo.hasGrace = true end
+                if string.find(bname, "empowerchampion") then buffInfo.hasEmpower = true end
                 
                 b = b + 1
             end
@@ -1128,6 +1145,10 @@ function PriestPowerBuffBar_Create()
         PriestPowerBuffBar_SavePosition()
     end)
     f:SetScript("OnHide", function() this:StopMovingOrSizing() end)
+    
+    -- HOOK: Run global update loop
+    -- Use anonymous function to pass 'arg1' (elapsed) explicitly, as SetScript might not pass it directly or correctly in 1.12
+    f:SetScript("OnUpdate", function() PriestPower_OnUpdate(arg1) end)
 
     -- 4. Title Header
     local lbl = f:CreateFontString("$parentTitle", "OVERLAY", "GameFontNormalSmall")
@@ -1507,9 +1528,58 @@ function PriestPower_BuffButton_OnClick(btn)
             end
         end
     else
-        -- Group Buff Logic (Placeholder for now)
-        -- TBD: SmartBuff logic for groups?
-        DEFAULT_CHAT_FRAME:AddMessage("PriestPower: Group Buff Clicked ("..suffix..") - Not Implemented")
+        -- Group Buff Logic
+        local gid = i
+        local spellName = nil
+        local buffKey = nil
+        
+        if suffix == "Fort" then 
+            spellName = SPELL_FORTITUDE
+            buffKey = "hasFort"
+        elseif suffix == "Spirit" then 
+            spellName = SPELL_SPIRIT
+            buffKey = "hasSpirit"
+        end
+        
+        if spellName and CurrentBuffs[gid] then
+             -- Iterate members in group
+             local castDone = false
+             for _, member in CurrentBuffs[gid] do
+                 -- Check eligibility: Visible, Alive, Missing Buff
+                 if member.visible and not member.dead and not member[buffKey] then
+                     -- Potential candidate
+                     ClearTarget()
+                     TargetByName(member.name, true)
+                     
+                     -- Verify Target
+                     if UnitExists("target") and UnitName("target") == member.name then
+                         -- Check Range (28 yards approx)
+                         -- CheckInteractDistance("target", 4)
+                         if CheckInteractDistance("target", 4) then
+                             CastSpellByName(spellName)
+                             -- TargetLastTarget() -- Restore target immediately?
+                             -- Or wait for cast? Macro style "Cast; TargetLastTarget" usually works.
+                             TargetLastTarget()
+                             -- Force Scan to update "1/5" text immediately (local client state)
+                             PriestPower_ScanRaid()
+                             PriestPower_UpdateBuffBar() 
+                             castDone = true
+                             break -- Stop loop, one cast per click
+                         else
+                             -- Out of range, skip to next
+                             ClearTarget()
+                         end
+                     end
+                 end
+             end
+             
+             if not castDone then
+                 DEFAULT_CHAT_FRAME:AddMessage("PriestPower: No eligible targets in range for Group "..gid)
+                 TargetLastTarget() -- Restore if we messed with target but didn't cast
+             end
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("PriestPower: Unknown Button ("..suffix..")")
+        end
     end
 end
 
