@@ -462,7 +462,7 @@ function PriestPower_OnEvent(event)
                 smartbuffs = 1,
             }
         end
-        UIDropDownMenu_Initialize(PriestPowerChampDropDown, PriestPower_ChampDropDown_Initialize, "MENU")
+        UIDropDownMenu_Initialize(PriestPowerChampDropDown, PriestPower_ChampDropDown_Combined, "MENU")
         
         local _, class = UnitClass("player")
         if class == "PRIEST" then
@@ -1403,6 +1403,253 @@ function PriestPowerSubButton_OnEnter(btn)
      GameTooltip:Show()
 end
 
+-----------------------------------------------------------------------------------
+-- Custom Scrollable Player Selection Frame
+-----------------------------------------------------------------------------------
+
+PP_SCROLL_ROWS = 10  -- Number of visible rows
+PP_ROW_HEIGHT = 20
+
+function PP_CreatePlayerSelectFrame()
+    if getglobal("PPPlayerSelectFrame") then return end
+    
+    local f = CreateFrame("Frame", "PPPlayerSelectFrame", UIParent)
+    f:SetWidth(220)
+    f:SetHeight(30 + (PP_SCROLL_ROWS * PP_ROW_HEIGHT))
+    f:SetPoint("CENTER", 0, 0)
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 5, right = 5, top = 5, bottom = 5 }
+    })
+    f:SetBackdropColor(0, 0, 0, 0.9)
+    
+    -- Title
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -10)
+    title:SetText("Select Target")
+    f.title = title
+    
+    -- Close Button
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    
+    -- Clear Assignment Button
+    local clearBtn = CreateFrame("Button", "PPPlayerSelectClear", f, "UIPanelButtonTemplate")
+    clearBtn:SetWidth(100)
+    clearBtn:SetHeight(20)
+    clearBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -28)
+    clearBtn:SetText("Clear")
+    clearBtn:SetScript("OnClick", function()
+        PP_SelectPlayer("CLEAR")
+    end)
+    
+    -- Scroll Frame Container
+    local scrollContainer = CreateFrame("Frame", nil, f)
+    scrollContainer:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -52)
+    scrollContainer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 8)
+    
+    -- Scroll Frame
+    local scrollFrame = CreateFrame("ScrollFrame", "PPPlayerSelectScroll", scrollContainer, "FauxScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+    scrollFrame:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(PP_ROW_HEIGHT, PP_UpdatePlayerSelectList)
+    end)
+    
+    -- Create Row Buttons
+    for i = 1, PP_SCROLL_ROWS do
+        local row = CreateFrame("Button", "PPPlayerSelectRow"..i, scrollContainer)
+        row:SetWidth(180)
+        row:SetHeight(PP_ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", scrollContainer, "TOPLEFT", 0, -((i-1) * PP_ROW_HEIGHT))
+        
+        -- Highlight Texture
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints(row)
+        hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        hl:SetBlendMode("ADD")
+        
+        -- Text
+        local text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        text:SetPoint("LEFT", row, "LEFT", 5, 0)
+        text:SetJustifyH("LEFT")
+        row.text = text
+        
+        -- Check Mark (for current selection)
+        local check = row:CreateTexture(nil, "OVERLAY")
+        check:SetWidth(14)
+        check:SetHeight(14)
+        check:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        check:Hide()
+        row.check = check
+        
+        row:SetScript("OnClick", function()
+            if this.playerName then
+                PP_SelectPlayer(this.playerName)
+            end
+        end)
+        
+        row:Hide()
+    end
+    
+    -- Movable
+    f:SetScript("OnMouseDown", function()
+        if arg1 == "LeftButton" then this:StartMoving() end
+    end)
+    f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
+    
+    f:Hide()
+end
+
+-- Data for selection
+PP_PlayerList = {}
+
+function PP_PopulatePlayerList()
+    PP_PlayerList = {}
+    
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    if numRaid > 0 then
+        -- Raid: Sort by group then name
+        local byGroup = {}
+        for g = 1, 8 do byGroup[g] = {} end
+        
+        for i = 1, numRaid do
+            local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
+            if name and subgroup >= 1 and subgroup <= 8 then
+                table.insert(byGroup[subgroup], { name = name, class = class, group = subgroup })
+            end
+        end
+        
+        for g = 1, 8 do
+            for _, p in ipairs(byGroup[g]) do
+                table.insert(PP_PlayerList, p)
+            end
+        end
+    elseif numParty > 0 then
+        -- Party
+        local _, pClass = UnitClass("player")
+        table.insert(PP_PlayerList, { name = UnitName("player"), class = pClass or "Unknown", group = 1 })
+        for i = 1, numParty do
+            local name = UnitName("party"..i)
+            local _, class = UnitClass("party"..i)
+            if name then
+                table.insert(PP_PlayerList, { name = name, class = class or "Unknown", group = 1 })
+            end
+        end
+    else
+        -- Solo
+        local _, pClass = UnitClass("player")
+        table.insert(PP_PlayerList, { name = UnitName("player"), class = pClass or "Unknown", group = 1 })
+    end
+end
+
+function PP_UpdatePlayerSelectList()
+    local scrollFrame = getglobal("PPPlayerSelectScroll")
+    if not scrollFrame then return end
+    
+    local totalItems = table.getn(PP_PlayerList)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame)
+    
+    FauxScrollFrame_Update(scrollFrame, totalItems, PP_SCROLL_ROWS, PP_ROW_HEIGHT)
+    
+    -- Force scrollbar to always be visible
+    local scrollBar = getglobal("PPPlayerSelectScrollScrollBar")
+    if scrollBar then
+        scrollBar:Show()
+    end
+    
+    local mode = PriestPower_AssignMode or "Champ"
+    local currentAssignment = nil
+    if PriestPower_ContextName and PriestPower_LegacyAssignments[PriestPower_ContextName] then
+        currentAssignment = PriestPower_LegacyAssignments[PriestPower_ContextName][mode]
+    end
+    
+    for i = 1, PP_SCROLL_ROWS do
+        local row = getglobal("PPPlayerSelectRow"..i)
+        local idx = offset + i
+        
+        if idx <= totalItems then
+            local p = PP_PlayerList[idx]
+            row.playerName = p.name
+            row.text:SetText("["..p.group.."] "..p.name.." ("..p.class..")")
+            
+            -- Show check if currently assigned
+            if p.name == currentAssignment then
+                row.check:Show()
+            else
+                row.check:Hide()
+            end
+            
+            row:Show()
+        else
+            row.playerName = nil
+            row:Hide()
+        end
+    end
+end
+
+function PP_ShowPlayerSelect(anchorFrame, priestName, mode)
+    PP_CreatePlayerSelectFrame()
+    
+    PriestPower_ContextName = priestName
+    PriestPower_AssignMode = mode or "Champ"
+    
+    local f = getglobal("PPPlayerSelectFrame")
+    f.title:SetText("Select "..mode.." Target")
+    
+    -- Position near anchor
+    f:ClearAllPoints()
+    if anchorFrame then
+        f:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, 0)
+    else
+        f:SetPoint("CENTER", 0, 0)
+    end
+    
+    PP_PopulatePlayerList()
+    PP_UpdatePlayerSelectList()
+    
+    f:Show()
+end
+
+function PP_SelectPlayer(playerName)
+    local pname = PriestPower_ContextName
+    local mode = PriestPower_AssignMode or "Champ"
+    
+    if not pname then return end
+    
+    PriestPower_LegacyAssignments[pname] = PriestPower_LegacyAssignments[pname] or {}
+    
+    if playerName == "CLEAR" then
+        PriestPower_LegacyAssignments[pname][mode] = nil
+        DEFAULT_CHAT_FRAME:AddMessage("Cleared "..mode.." for "..pname)
+        if mode == "Champ" then
+            PriestPower_SendMessage("ASSIGNCHAMP "..pname.." nil")
+        end
+    else
+        PriestPower_LegacyAssignments[pname][mode] = playerName
+        DEFAULT_CHAT_FRAME:AddMessage("Assigned "..mode.." for "..pname..": "..playerName)
+        if mode == "Champ" then
+            PriestPower_SendMessage("ASSIGNCHAMP "..pname.." "..playerName)
+        end
+    end
+    
+    PriestPower_UpdateUI()
+    
+    local f = getglobal("PPPlayerSelectFrame")
+    if f then f:Hide() end
+end
+
 -- Context for Dropdown (Which priest are we assigning for?)
 PriestPower_ContextName = nil
 PriestPower_AssignMode = "Champ" -- "Champ" or "Enlighten"
@@ -1432,7 +1679,7 @@ function PriestPowerChampButton_OnClick(btn)
         return
     end
     
-    ToggleDropDownMenu(1, nil, PriestPowerChampDropDown, btn:GetName(), 0, 0)
+    PP_ShowPlayerSelect(btn, pname, "Champ")
 end
 
 function PriestPowerEnlightenButton_OnClick(btn)
@@ -1459,7 +1706,7 @@ function PriestPowerEnlightenButton_OnClick(btn)
         return
     end
     
-    ToggleDropDownMenu(1, nil, PriestPowerChampDropDown, btn:GetName(), 0, 0)
+    PP_ShowPlayerSelect(btn, pname, "Enlighten")
 end
 
 function PriestPower_AssignChamp_OnClick()
@@ -1498,6 +1745,7 @@ end
 
 function PriestPower_ChampDropDown_Initialize()
     local info = {}
+    local mode = PriestPower_AssignMode or "Champ"
     
     -- Option to Clear
     info = {}
@@ -1506,24 +1754,28 @@ function PriestPower_ChampDropDown_Initialize()
     info.func = PriestPower_AssignChamp_OnClick
     UIDropDownMenu_AddButton(info)
     
-    -- List Raid Members
+    -- List Raid Members by Group (Submenus)
     local numRaid = GetNumRaidMembers()
     if numRaid > 0 then
-        -- Sort or Group logic could go here, for now flat list
+        -- Build group tables
+        local groups = {}
+        for g = 1, 8 do groups[g] = {} end
+        
         for i = 1, numRaid do
             local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
-            if name then
+            if name and subgroup >= 1 and subgroup <= 8 then
+                table.insert(groups[subgroup], { name = name, class = class })
+            end
+        end
+        
+        -- Create submenu for each non-empty group
+        for g = 1, 8 do
+            if table.getn(groups[g]) > 0 then
                 info = {}
-                info.text = "["..subgroup.."] "..name.." ("..class..")"
-                info.value = name
-                info.func = PriestPower_AssignChamp_OnClick
-                
-                -- Check Checked
-                if PriestPower_ContextName and PriestPower_LegacyAssignments[PriestPower_ContextName] and 
-                   PriestPower_LegacyAssignments[PriestPower_ContextName]["Champ"] == name then
-                    info.checked = 1
-                end
-                
+                info.text = "Group "..g.." ("..table.getn(groups[g])..")"
+                info.hasArrow = 1
+                info.notCheckable = 1
+                info.value = g
                 UIDropDownMenu_AddButton(info)
             end
         end
@@ -1531,25 +1783,64 @@ function PriestPower_ChampDropDown_Initialize()
         -- If in party (Debug/5-man) or Solo
         local numParty = GetNumPartyMembers()
         
-         -- Add Player (Always available in Party/Solo)
-         local info = {}
-         info.text = UnitName("player")
-         info.value = UnitName("player")
-         info.func = PriestPower_AssignChamp_OnClick
-         UIDropDownMenu_AddButton(info)
+        -- Add Player (Always available in Party/Solo)
+        info = {}
+        info.text = UnitName("player")
+        info.value = UnitName("player")
+        info.func = PriestPower_AssignChamp_OnClick
+        UIDropDownMenu_AddButton(info)
          
         if numParty > 0 then
-             for i=1, numParty do
-                 local name = UnitName("party"..i)
-                 if name then
-                     info = {}
-                     info.text = name
-                     info.value = name
-                     info.func = PriestPower_AssignChamp_OnClick
-                     UIDropDownMenu_AddButton(info)
-                 end
-             end
+            for i=1, numParty do
+                local name = UnitName("party"..i)
+                if name then
+                    info = {}
+                    info.text = name
+                    info.value = name
+                    info.func = PriestPower_AssignChamp_OnClick
+                    UIDropDownMenu_AddButton(info)
+                end
+            end
         end
+    end
+end
+
+-- Submenu for each raid group
+function PriestPower_ChampDropDown_GroupInit(level)
+    if level ~= 2 then return end
+    
+    local groupID = UIDROPDOWNMENU_MENU_VALUE
+    if not groupID or type(groupID) ~= "number" then return end
+    
+    local mode = PriestPower_AssignMode or "Champ"
+    
+    for i = 1, GetNumRaidMembers() do
+        local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
+        if name and subgroup == groupID then
+            local info = {}
+            info.text = name.." ("..class..")"
+            info.value = name
+            info.func = PriestPower_AssignChamp_OnClick
+            
+            -- Check if currently assigned
+            if PriestPower_ContextName and PriestPower_LegacyAssignments[PriestPower_ContextName] and 
+               PriestPower_LegacyAssignments[PriestPower_ContextName][mode] == name then
+                info.checked = 1
+            end
+            
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+end
+
+-- Combined initializer that handles both levels
+function PriestPower_ChampDropDown_Combined(level)
+    if not level then level = 1 end
+    
+    if level == 1 then
+        PriestPower_ChampDropDown_Initialize()
+    elseif level == 2 then
+        PriestPower_ChampDropDown_GroupInit(level)
     end
 end
 
