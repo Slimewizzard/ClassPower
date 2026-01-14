@@ -356,7 +356,7 @@ CurrentBuffsByName = {}
 
 function PriestPower_ScanRaid()
     if not IsPriest then return end
-    
+
     -- Reset
     CurrentBuffs = {}
     for i=1, 8 do CurrentBuffs[i] = {} end
@@ -372,6 +372,11 @@ function PriestPower_ScanRaid()
     
     -- Helper to process unit
     local function ProcessUnit(unit, name, subgroup, class)
+         -- Guard: Check if unit ID is valid pattern (player, partyN, raidN)
+         -- UnitExists might error on invalid strings in 1.12
+         local isValid = (unit == "player") or string.find(unit, "^party%d+$") or string.find(unit, "^raid%d+$")
+         if not isValid then return end
+         if not UnitExists(unit) then return end
          if name and class == "PRIEST" then
              foundPriests[name] = true
              if not AllPriests[name] then
@@ -1153,12 +1158,16 @@ function PriestPowerBuffBar_Create()
         PriestPowerBuffBar_SavePosition()
     end)
     
-    -- 6. Pre-create Row Frames (Pool of 8)
-    -- Structure: Row -> Label, ButtonFt, ButtonSp
-    for i=1, 8 do
+    -- 6. Pre-create Row Frames (Pool of 9)
+    -- Rows 1-8: Group Buffs
+    -- Row 9: Champion
+    for i=1, 9 do
         local row = CreateFrame("Frame", "PriestPowerHUDRow"..i, f)
         row:SetWidth(110)
         row:SetHeight(30)
+        
+        -- Special width for Row 9 (Champ) due to 3 buttons
+        if i == 9 then row:SetWidth(150) end
         row:SetPoint("TOPLEFT", 10, -20) -- Temp anchor
         row:Hide()
         
@@ -1166,20 +1175,15 @@ function PriestPowerBuffBar_Create()
         local l = row:CreateFontString("$parentLabel", "OVERLAY", "GameFontNormalSmall")
         l:SetPoint("LEFT", 0, 0)
         l:SetJustifyH("LEFT")
-        l:SetText("Grp "..i)
-        
         -- Helper to create button
         local function CreateBuffBtn(suffix)
             local b = CreateFrame("Button", "PriestPowerHUDRow"..i..suffix, row) 
-            -- Actually GameMenuButtonTemplate is generic. 
-            -- Let's build custom button with Icon + Text overlay
             b:SetWidth(28); b:SetHeight(28)
             b:SetBackdrop(nil)
             b:SetNormalTexture("")
             b:SetPushedTexture("")
             b:SetHighlightTexture("")
             b:SetDisabledTexture("")
-            -- End of texture clearing
 
             local icon = b:CreateTexture("$parentIcon", "BACKGROUND")
             icon:SetAllPoints(b)
@@ -1187,12 +1191,14 @@ function PriestPowerBuffBar_Create()
             
             local txt = b:CreateFontString("$parentText", "OVERLAY", "GameFontHighlight")
             txt:SetPoint("CENTER", 0, 0)
-            txt:SetText("") -- Was placeholder "5/5"
+            txt:SetText("") 
             
             b:SetScript("OnEnter", function() 
                 GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-                GameTooltip:SetText(this.tooltipText)
-                GameTooltip:Show()
+                if this.tooltipText then
+                    GameTooltip:SetText(this.tooltipText)
+                    GameTooltip:Show()
+                end
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide() end)
             b:SetScript("OnClick", function() 
@@ -1200,67 +1206,33 @@ function PriestPowerBuffBar_Create()
                  PriestPower_BuffButton_OnClick(this)
             end)
             b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            
             return b
         end
-        
-        local btnFort = CreateBuffBtn("Fort")
-        btnFort:SetPoint("LEFT", l, "RIGHT", 5, 0)
-        
-        local btnSpirit = CreateBuffBtn("Spirit")
-        btnSpirit:SetPoint("LEFT", btnFort, "RIGHT", 2, 0)
-        
-        -- Shadow Prot? Not implemented in XML logic, skipping.
+
+        if i == 9 then
+             l:SetText("Champ")
+             -- Champion Buttons
+             local btnP = CreateBuffBtn("Proclaim")
+             btnP:SetPoint("LEFT", l, "RIGHT", 5, 0)
+             getglobal(btnP:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Proclaim"])
+             
+             local btnG = CreateBuffBtn("Grace")
+             btnG:SetPoint("LEFT", btnP, "RIGHT", 2, 0)
+             getglobal(btnG:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Grace"])
+             
+             local btnE = CreateBuffBtn("Empower")
+             btnE:SetPoint("LEFT", btnG, "RIGHT", 2, 0)
+             getglobal(btnE:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Empower"])
+        else
+            l:SetText("Grp "..i)
+            
+            local btnFort = CreateBuffBtn("Fort")
+            btnFort:SetPoint("LEFT", l, "RIGHT", 5, 0)
+            
+            local btnSpirit = CreateBuffBtn("Spirit")
+            btnSpirit:SetPoint("LEFT", btnFort, "RIGHT", 2, 0)
+        end
     end
-    
-    
-    -- 7. Champion Frame (Legacy Support)
-    local cFrame = CreateFrame("Frame", "PriestPowerBuffBarChamp", f)
-    cFrame:SetWidth(100); cFrame:SetHeight(40)
-    cFrame:Hide()
-    cFrame:SetScale(1.4)
-    
-    local cName = cFrame:CreateFontString("$parentName", "OVERLAY", "GameFontNormal")
-    cName:SetPoint("TOP", 0, 0)
-    cName:SetText("Champion")
-    
-    -- Helper for Champ Buttons
-    local function CreateChampBtn(name, iconPath, anchorTo, anchorPoint, x, y)
-        local b = CreateFrame("Button", "PriestPowerBuffBarChamp"..name, cFrame)
-        b:SetWidth(24); b:SetHeight(24)
-        
-        local icon = b:CreateTexture("$parentIcon", "BACKGROUND")
-        icon:SetAllPoints(b)
-        icon:SetTexture(iconPath)
-        
-        local txt = b:CreateFontString("$parentText", "OVERLAY", "GameFontHighlightSmall")
-        txt:SetPoint("CENTER", 0, 0)
-        
-        b:SetPoint(anchorPoint, anchorTo, x, y)
-        
-        -- Tooltip
-        b:SetScript("OnEnter", function() 
-             GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-             GameTooltip:SetText(name) -- Basic tooltip
-             GameTooltip:Show()
-        end)
-        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        b:SetScript("OnClick", function()
-             PriestPower_BuffButton_OnClick(this) -- Reusing logic? Or needs Champ specific?
-             -- Champ buttons usually didn't have click logic in previous XML? 
-             -- Wait, XML had OnClick -> PriestPower_BuffButton_OnClick(this).
-             -- But they are named differently. Logic might need check.
-             -- Recreating XML structure: 
-             -- PriestPowerChampionTemplate buttons had: <OnClick>PriestPower_ChampButton_OnClick(this)</OnClick>
-             PriestPower_ChampButton_OnClick(this)
-        end)
-        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        return b
-    end
-    
-    local btnP = CreateChampBtn("Proclaim", PriestPower_ChampionIcons["Proclaim"], cName, "TOP", "BOTTOM", 0, -5)
-    local btnG = CreateChampBtn("Grace", PriestPower_ChampionIcons["Grace"], btnP, "LEFT", "RIGHT", 2, 0)
-    local btnE = CreateChampBtn("Empower", PriestPower_ChampionIcons["Empower"], btnG, "LEFT", "RIGHT", 2, 0)
     
     
     -- Restoring Position
@@ -1327,8 +1299,6 @@ function PriestPower_UpdateBuffBar()
     if not getglobal("PriestPowerBuffBar") then return end
     
     local f = PriestPowerBuffBar
-    local champFrame = getglobal("PriestPowerBuffBarChamp")
-    champFrame:Hide()
     
     local pname = UnitName("player")
     local assigns = PriestPower_Assignments[pname]
@@ -1336,12 +1306,78 @@ function PriestPower_UpdateBuffBar()
     local lastRow = nil
     local count = 0
     
-    if assigns then
-        for i=1, 8 do
+
+    if assigns or (PriestPower_LegacyAssignments[pname] and PriestPower_LegacyAssignments[pname]["Champ"]) then
+        for i=1, 9 do
             local row = getglobal("PriestPowerHUDRow"..i)
             local showRow = false
             
-            if assigns[i] and assigns[i] > 0 then
+            if i == 9 then
+                 -- CHAMPION ROW
+                 local target = PriestPower_LegacyAssignments[pname] and PriestPower_LegacyAssignments[pname]["Champ"]
+                 if target then
+                     local status = CurrentBuffsByName[target]
+                     local btnP = getglobal(row:GetName().."Proclaim")
+                     local btnG = getglobal(row:GetName().."Grace")
+                     local btnE = getglobal(row:GetName().."Empower")
+                     
+                     -- PROCLAIM (0/1 or 1/1)
+                     btnP:Show()
+                     btnP.tooltipText = "Champion: "..target.." (Proclaim)"
+                     local txtP = getglobal(btnP:GetName().."Text")
+                     if status and status.hasProclaim then
+                         txtP:SetText("1/1")
+                         txtP:SetTextColor(0,1,0)
+                     else
+                         txtP:SetText("0/1")
+                         txtP:SetTextColor(1,0,0)
+                     end
+                     -- getglobal(btnP:GetName().."Icon"):SetTexture(PriestPower_ChampionIcons["Proclaim"]) -- Already set in Create
+                     
+                     -- GRACE / EMPOWER (Timers)
+                     local function GetTimerText(key)
+                         if PP_BuffTimers[target] and PP_BuffTimers[target][key] then
+                             local rem = PP_BuffTimers[target][key] - time()
+                             if rem > 3600 then return math.ceil(rem/3600).."h"
+                             elseif rem > 60 then return math.ceil(rem/60).."m"
+                             elseif rem > 0 then return math.ceil(rem).."s"
+                             end
+                         end
+                         return ""
+                     end
+                     
+                     -- Anchoring G/E (Side by side default)
+                     btnG:ClearAllPoints(); btnG:SetPoint("LEFT", btnP, "RIGHT", 2, 0)
+                     btnE:ClearAllPoints(); btnE:SetPoint("LEFT", btnG, "RIGHT", 2, 0)
+                     
+                     if status then
+                        if status.hasGrace then
+                            btnG:Show(); btnG:SetAlpha(1.0)
+                            getglobal(btnG:GetName().."Text"):SetText(GetTimerText("Grace"))
+                            btnE:Hide()
+                            btnE:SetAlpha(0.4)
+                        elseif status.hasEmpower then
+                            btnE:Show(); btnE:SetAlpha(1.0)
+                            -- If overlap desired: btnE:SetPoint("LEFT", btnP, "RIGHT", 2, 0)
+                            -- Logic: Overlap if Grace is hidden?
+                            btnE:ClearAllPoints(); btnE:SetPoint("LEFT", btnP, "RIGHT", 2, 0)
+                            getglobal(btnE:GetName().."Text"):SetText(GetTimerText("Empower"))
+                            btnG:Hide()
+                            btnG:SetAlpha(0.4)
+                        else
+                             -- Neither
+                             btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
+                             btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
+                        end
+                     else
+                         btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
+                         btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
+                     end
+                     showRow = true
+                 else
+                     -- No champ assigned
+                 end
+            elseif assigns[i] and assigns[i] > 0 then
                local val = assigns[i]
                 -- Check Fort (Bit 1)
                 local btnFort = getglobal(row:GetName().."Fort")
@@ -1415,81 +1451,71 @@ function PriestPower_UpdateBuffBar()
         end
     end
     
-    -- Champion Logic
-    if PriestPower_LegacyAssignments[pname] and PriestPower_LegacyAssignments[pname]["Champ"] then
-         champFrame:Show()
-         champFrame:ClearAllPoints()
-         if lastRow then
-             champFrame:SetPoint("TOP", lastRow, "BOTTOM", 0, -5)
-         else
-             champFrame:SetPoint("TOP", f, "TOP", 0, -25)
-         end
-         
-         count = count + 1.5 -- Extra space for champ
-         -- Update Champ Buttons logic (timers etc)
-         -- (Simplified for brevity, Logic is same as before primarily setting Textures/Timers)
-         -- ... Copying logic ...
-         local target = PriestPower_LegacyAssignments[pname]["Champ"]
-         local status = CurrentBuffsByName[target]
-         getglobal(champFrame:GetName().."Name"):SetText(target)
-
-        -- Helper Timer Function
-        local function GetTimerText(key)
-             if PP_BuffTimers[target] and PP_BuffTimers[target][key] then
-                 local rem = PP_BuffTimers[target][key] - time()
-                 if rem > 3600 then return math.ceil(rem/3600).."h"
-                 elseif rem > 60 then return math.ceil(rem/60).."m"
-                 elseif rem > 0 then return math.ceil(rem).."s"
-                 end
-             end
-             return ""
-        end
-        
-        local btnP = getglobal("PriestPowerBuffBarChampProclaim")
-        local btnG = getglobal("PriestPowerBuffBarChampGrace")
-        local btnE = getglobal("PriestPowerBuffBarChampEmpower")
-        
-         if status and status.hasProclaim then
-             btnP:SetAlpha(1.0)
-             getglobal(btnP:GetName().."Text"):SetText(GetTimerText("Proclaim"))
-        else
-             btnP:SetAlpha(1.0)
-             getglobal(btnP:GetName().."Text"):SetText("X") -- Simple red X
-             getglobal(btnP:GetName().."Text"):SetTextColor(1,0,0)
-        end
-        
-        -- Anchoring G/E
-        btnG:ClearAllPoints(); btnG:SetPoint("LEFT", btnP, "RIGHT", 2, 0)
-        btnE:ClearAllPoints(); btnE:SetPoint("LEFT", btnP, "RIGHT", 2, 0) -- Overlap, visibility toggled
-        
-         if status then 
-            if status.hasGrace then
-                btnG:Show(); btnG:SetAlpha(1.0)
-                getglobal(btnG:GetName().."Text"):SetText(GetTimerText("Grace"))
-                btnE:Hide()
-            elseif status.hasEmpower then
-                btnG:Hide()
-                btnE:Show(); btnE:SetAlpha(1.0)
-                getglobal(btnE:GetName().."Text"):SetText(GetTimerText("Empower"))
-            else
-                btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
-                btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
-            end
-        else
-             btnG:Show(); btnG:SetAlpha(0.4); getglobal(btnG:GetName().."Text"):SetText("")
-             btnE:Show(); btnE:SetAlpha(0.4); getglobal(btnE:GetName().."Text"):SetText("")
-        end
-    end
-    
     -- Resize Main Frame
     local newHeight = 25 + (count * 30)
     if newHeight < 40 then newHeight = 40 end
     f:SetHeight(newHeight)
+    
+    -- Dynamic Width? If Champ is visible (which is row 9), widen parent?
+    local lastRowIsChamp = (lastRow and lastRow:GetName() == "PriestPowerHUDRow9")
+    if lastRowIsChamp then
+         f:SetWidth(150)
+    else
+         f:SetWidth(110)
+    end
 end
 
+function PriestPower_BuffButton_OnClick(btn)
+    local name = btn:GetName()
+    -- Format: PriestPowerHUDRow{i}{Suffix}
+    local _, _, rowStr, suffix = string.find(name, "PriestPowerHUDRow(%d+)(.*)")
+    if not rowStr then return end
+    
+    local i = tonumber(rowStr)
+    local pname = UnitName("player")
+    
+    if i == 9 then
+        -- Champion Logic
+        local target = PriestPower_LegacyAssignments[pname] and PriestPower_LegacyAssignments[pname]["Champ"]
+        if not target then
+            DEFAULT_CHAT_FRAME:AddMessage("PriestPower: No Champion Assigned!")
+            return
+        end
+        
+        -- Mapping Suffix to Spell Name
+        -- Proclaim -> "Proclaim Champion"
+        -- Grace -> "Champion's Grace"
+        -- Empower -> "Champion's Empower"
+        local spell = nil
+        if suffix == "Proclaim" then spell = "Proclaim Champion"
+        elseif suffix == "Grace" then spell = "Champion's Grace"
+        elseif suffix == "Empower" then spell = "Champion's Empower"
+        end
+        
+        if spell then
+            -- Simple Target-Cast-TargetLast logic
+            -- Note: In 1.12, CastSpellByName works but requires target.
+            -- Check if target is in range? (Can't easily without targeting)
+            
+            ClearTarget()
+            TargetByName(target, true)
+            if UnitName("target") == target then
+                CastSpellByName(spell)
+                TargetLastTarget()
+            else
+                DEFAULT_CHAT_FRAME:AddMessage("PriestPower: Could not target "..target)
+            end
+        end
+    else
+        -- Group Buff Logic (Placeholder for now)
+        -- TBD: SmartBuff logic for groups?
+        DEFAULT_CHAT_FRAME:AddMessage("PriestPower: Group Buff Clicked ("..suffix..") - Not Implemented")
+    end
+end
+
+
+
 -- Hook for creation
--- In case CreateBuffBar was expected to be called elsewhere, mapped it to new function:
 function PriestPower_CreateBuffBar()
     PriestPowerBuffBar_Create()
 end
-
