@@ -1,6 +1,6 @@
 # PriestPower
 
-PriestPower is a priest-focused addon for World of Warcraft 1.12.1 (specifically optimized for **Turtle WoW**). Inspired by the classic PallyPower, it simplifies raid-wide buff management and provides specialized tracking for unique Priest class features.
+PriestPower is a priest-focused addon for World of Warcraft 1.12.1. Inspired by the classic PallyPower, it simplifies raid-wide buff management and provides specialized tracking for unique Priest class features.
 
 ## Features
 
@@ -17,6 +17,11 @@ PriestPower is a priest-focused addon for World of Warcraft 1.12.1 (specifically
   - **Target Cycling**: Click the single-buff icons to automatically target and cast on players missing their buffs.
 - **Raid Coordination**: Syncs seamlessly with other PriestPower users to ensure everyone knows their assignments.
 - **Pure Lua UI**: Rewritten for high performance and stability, removing the dependency on legacy XML templates.
+
+Icons will disapper once you have done your buff. 
+You can rightclick to spotbuff, left click to refresh the whole group. 
+<img width="609" height="339" alt="bilde" src="https://github.com/user-attachments/assets/2c379d69-6ad3-4529-8a62-a8eba9d3ea97" />
+
 
 ## Commands
 
@@ -40,5 +45,10 @@ PriestPower is a priest-focused addon for World of Warcraft 1.12.1 (specifically
 
 ## Credits
 
-- Originally based on **PallyPower** by Relar.
-- Adapted and modernized for **Turtle WoW** and the Priest class.
+- Inspired by the work on **PallyPower** by Relar.
+
+## Support
+
+- Feel free to add feedback if you like my projects.
+- I aim to make this as good as possible. Preformence, more feature suggestions. 
+- https://buymeacoffee.com/slimewizzard
