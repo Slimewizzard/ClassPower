@@ -947,6 +947,11 @@ function Paladin:SaveBuffBarPosition()
     CP_PerUser.PaladinScale = self.BuffBar:GetScale()
 end
 
+function Paladin:SaveConfigPosition()
+    if not self.ConfigWindow then return end
+    CP_PerUser.PaladinConfigScale = self.ConfigWindow:GetScale()
+end
+
 function Paladin:UpdateBuffBar()
     if not self.BuffBar then return end
     
@@ -1124,6 +1129,16 @@ function Paladin:CreateConfigWindow()
     end)
     f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
     
+    -- Add resize grip for scaling
+    local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
+    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
+    grip:SetScript("OnMouseUp", function()
+        local p = this:GetParent()
+        p.isResizing = false
+        this:SetScript("OnUpdate", nil)
+        Paladin:SaveConfigPosition()
+    end)
+    
     local headerY = -48
     
     local lblPaladin = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1153,6 +1168,7 @@ function Paladin:CreateConfigWindow()
         self:CreateConfigRow(f, i)
     end
     
+    -- Apply saved scale
     if CP_PerUser.PaladinConfigScale then
         f:SetScale(CP_PerUser.PaladinConfigScale)
     else
@@ -1249,7 +1265,8 @@ function Paladin:CreateConfigRow(parent, rowIndex)
     judgeBtn:SetScript("OnEnter", function() Paladin:JudgeButton_OnEnter(this) end)
     judgeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     
-    row:Hide()
+    row.classID = rowIndex - 1
+    
     return row
 end
 
@@ -1267,6 +1284,7 @@ function Paladin:UpdateConfigGrid()
         local row = getglobal("CPPaladinRow"..rowIndex)
         if row then
             row:Show()
+            row.paladinName = paladinName  -- Store for click handlers
             
             local nameStr = getglobal("CPPaladinRow"..rowIndex.."Name")
             if nameStr then
@@ -1333,8 +1351,8 @@ function Paladin:UpdateClassButtons(rowIndex, paladinName)
         else
             -- Not assigned: show class icon, dimmed
             icon:SetTexture(self.ClassTextures[classID])
-            icon:SetAlpha(1.0)  -- Keep icon itself visible
-            btn:SetAlpha(0.4)   -- Dim the whole button
+            icon:SetAlpha(1.0)
+            btn:SetAlpha(0.4)
         end
     end
 end
@@ -1348,12 +1366,12 @@ function Paladin:UpdateAuraButton(rowIndex, paladinName)
     
     if auraID and auraID >= 0 then
         icon:SetTexture(self.AuraIcons[auraID])
-        icon:Show()
+        icon:SetAlpha(1.0)
         btn:SetAlpha(1.0)
     else
         icon:SetTexture("Interface\\Icons\\Spell_Holy_DevotionAura")
-        icon:SetAlpha(0.3)
-        btn:SetAlpha(0.5)
+        icon:SetAlpha(1.0)
+        btn:SetAlpha(0.4)
     end
 end
 
@@ -1366,12 +1384,12 @@ function Paladin:UpdateJudgeButton(rowIndex, paladinName)
     
     if judgeID and judgeID >= 0 then
         icon:SetTexture(self.JudgementIcons[judgeID])
-        icon:Show()
+        icon:SetAlpha(1.0)
         btn:SetAlpha(1.0)
     else
         icon:SetTexture("Interface\\Icons\\Spell_Holy_RighteousnessAura")
-        icon:SetAlpha(0.3)
-        btn:SetAlpha(0.5)
+        icon:SetAlpha(1.0)
+        btn:SetAlpha(0.4)
     end
 end
 
@@ -1379,23 +1397,23 @@ end
 -- Click Handlers
 -----------------------------------------------------------------------------------
 
+function Paladin:GetPaladinNameFromRow(rowIndex)
+    local index = 1
+    for name, _ in pairs(self.AllPaladins) do
+        if index == rowIndex then
+            return name
+        end
+        index = index + 1
+    end
+    return nil
+end
+
 function Paladin:ClearButton_OnClick(btn)
     local rowName = btn:GetParent():GetName()
     local _, _, rowIdx = string.find(rowName, "CPPaladinRow(%d+)")
     if not rowIdx then return end
     
-    -- Find the actual paladin name from the row data
-    local rowIndex = tonumber(rowIdx)
-    local paladinName = nil
-    local index = 1
-    for name, _ in pairs(self.AllPaladins) do
-        if index == rowIndex then
-            paladinName = name
-            break
-        end
-        index = index + 1
-    end
-    
+    local paladinName = self:GetPaladinNameFromRow(tonumber(rowIdx))
     if not paladinName then return end
     
     if not ClassPower_IsPromoted() and paladinName ~= UnitName("player") then
@@ -1403,7 +1421,6 @@ function Paladin:ClearButton_OnClick(btn)
         return
     end
     
-    -- Clear all assignments
     self.Assignments[paladinName] = {}
     for classID = 0, 9 do
         self.Assignments[paladinName][classID] = -1
@@ -1411,11 +1428,9 @@ function Paladin:ClearButton_OnClick(btn)
     self.AuraAssignments[paladinName] = nil
     self.JudgementAssignments[paladinName] = nil
     
-    -- Send sync message
     ClassPower_SendMessage("PCLEAR "..paladinName)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared all assignments for "..paladinName)
     
-    -- Force immediate UI update
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
 end
@@ -1428,17 +1443,7 @@ function Paladin:ClassButton_OnClick(btn)
     rowIdx = tonumber(rowIdx)
     classID = tonumber(classID)
     
-    -- Find the actual paladin name from the row data
-    local paladinName = nil
-    local index = 1
-    for name, _ in pairs(self.AllPaladins) do
-        if index == rowIdx then
-            paladinName = name
-            break
-        end
-        index = index + 1
-    end
-    
+    local paladinName = self:GetPaladinNameFromRow(rowIdx)
     if not paladinName then return end
     
     if not ClassPower_IsPromoted() and paladinName ~= UnitName("player") then
@@ -1447,16 +1452,13 @@ function Paladin:ClassButton_OnClick(btn)
     end
     
     if arg1 == "RightButton" then
-        -- Right-click: clear this class assignment
         self.Assignments[paladinName] = self.Assignments[paladinName] or {}
         self.Assignments[paladinName][classID] = -1
         ClassPower_SendMessage("PASSIGN "..paladinName.." "..classID.." -1")
         self:UpdateUI()
     elseif IsShiftKeyDown() then
-        -- Shift+Click: set same blessing for ALL classes
         self:CycleBlessingForwardAllClasses(paladinName, classID)
     else
-        -- Normal click: cycle blessing for this class only
         self:CycleBlessingForward(paladinName, classID)
     end
 end
@@ -1469,17 +1471,7 @@ function Paladin:ClassButton_OnMouseWheel(btn, delta)
     rowIdx = tonumber(rowIdx)
     classID = tonumber(classID)
     
-    -- Find the actual paladin name from the row data
-    local paladinName = nil
-    local index = 1
-    for name, _ in pairs(self.AllPaladins) do
-        if index == rowIdx then
-            paladinName = name
-            break
-        end
-        index = index + 1
-    end
-    
+    local paladinName = self:GetPaladinNameFromRow(rowIdx)
     if not paladinName then return end
     
     if not ClassPower_IsPromoted() and paladinName ~= UnitName("player") then
@@ -1487,10 +1479,8 @@ function Paladin:ClassButton_OnMouseWheel(btn, delta)
     end
     
     if IsShiftKeyDown() then
-        -- Shift+Scroll: set same blessing for ALL classes
         self:CycleBlessingForwardAllClasses(paladinName, classID)
     else
-        -- Normal scroll: cycle blessing for this class only
         self:CycleBlessingForward(paladinName, classID)
     end
 end
@@ -1503,17 +1493,7 @@ function Paladin:ClassButton_OnEnter(btn)
     classID = tonumber(classID)
     rowIdx = tonumber(rowIdx)
     
-    -- Find the actual paladin name from the row data
-    local paladinName = nil
-    local index = 1
-    for name, _ in pairs(self.AllPaladins) do
-        if index == rowIdx then
-            paladinName = name
-            break
-        end
-        index = index + 1
-    end
-    
+    local paladinName = self:GetPaladinNameFromRow(rowIdx)
     if not paladinName then return end
     
     local assigns = self.Assignments[paladinName] or {}
@@ -1540,8 +1520,7 @@ function Paladin:AuraButton_OnClick(btn)
     local _, _, rowIdx = string.find(btnName, "CPPaladinRow(%d+)Aura")
     if not rowIdx then return end
     
-    local nameStr = getglobal("CPPaladinRow"..rowIdx.."Name")
-    local paladinName = nameStr and nameStr:GetText()
+    local paladinName = self:GetPaladinNameFromRow(tonumber(rowIdx))
     if not paladinName then return end
     
     if not ClassPower_IsPromoted() and paladinName ~= UnitName("player") then
@@ -1558,9 +1537,8 @@ function Paladin:AuraButton_OnEnter(btn)
     local _, _, rowIdx = string.find(btnName, "CPPaladinRow(%d+)Aura")
     if not rowIdx then return end
     
-    local nameStr = getglobal("CPPaladinRow"..rowIdx.."Name")
-    local paladinName = nameStr and nameStr:GetText()
-    local auraID = self.AuraAssignments[paladinName]
+    local paladinName = self:GetPaladinNameFromRow(tonumber(rowIdx))
+    local auraID = paladinName and self.AuraAssignments[paladinName]
     
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
     GameTooltip:SetText("Aura Assignment", 1, 1, 1)
@@ -1578,8 +1556,7 @@ function Paladin:JudgeButton_OnClick(btn)
     local _, _, rowIdx = string.find(btnName, "CPPaladinRow(%d+)Judge")
     if not rowIdx then return end
     
-    local nameStr = getglobal("CPPaladinRow"..rowIdx.."Name")
-    local paladinName = nameStr and nameStr:GetText()
+    local paladinName = self:GetPaladinNameFromRow(tonumber(rowIdx))
     if not paladinName then return end
     
     if not ClassPower_IsPromoted() and paladinName ~= UnitName("player") then
@@ -1596,9 +1573,8 @@ function Paladin:JudgeButton_OnEnter(btn)
     local _, _, rowIdx = string.find(btnName, "CPPaladinRow(%d+)Judge")
     if not rowIdx then return end
     
-    local nameStr = getglobal("CPPaladinRow"..rowIdx.."Name")
-    local paladinName = nameStr and nameStr:GetText()
-    local judgeID = self.JudgementAssignments[paladinName]
+    local paladinName = self:GetPaladinNameFromRow(tonumber(rowIdx))
+    local judgeID = paladinName and self.JudgementAssignments[paladinName]
     
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
     GameTooltip:SetText("Judgement Assignment", 1, 1, 1)
@@ -1618,7 +1594,6 @@ end
 function Paladin:AuraDropDown_Initialize(level)
     local info = {}
     
-    info = {}
     info.text = ">> Clear <<"
     info.value = -1
     info.func = function() Paladin:AuraDropDown_OnClick(this.value) end
@@ -1653,7 +1628,6 @@ end
 function Paladin:JudgeDropDown_Initialize(level)
     local info = {}
     
-    info = {}
     info.text = ">> Clear <<"
     info.value = -1
     info.func = function() Paladin:JudgeDropDown_OnClick(this.value) end
