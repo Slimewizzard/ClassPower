@@ -967,7 +967,7 @@ function Paladin:SaveBuffBarPosition()
 end
 
 function Paladin:SaveConfigPosition()
-    if not self.ConfigWindow then return
+    if not self.ConfigWindow then return end
     CP_PerUser.PaladinConfigScale = self.ConfigWindow:GetScale()
 end
 
@@ -1164,9 +1164,26 @@ function Paladin:CreateConfigWindow()
     lblPaladin:SetPoint("TOPLEFT", f, "TOPLEFT", 25, headerY)
     lblPaladin:SetText("Paladin")
     
-    local lblSymbols = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lblSymbols:SetPoint("TOPLEFT", f, "TOPLEFT", 95, headerY)
+    -- Sym header with tooltip
+    local lblSymFrame = CreateFrame("Frame", nil, f)
+    lblSymFrame:SetWidth("30")
+    lblSymFrame:SetHeight("16")
+    lblSymFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 95, headerY)
+    
+    local lblSymbols = lblSymFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lblSymbols:SetAllPoints(lblSymFrame)
     lblSymbols:SetText("Sym")
+    
+    lblSymFrame:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Symbol of Kings", 1, 1, 1)
+        GameTooltip:AddLine("Reagent count for Greater Blessings", 1, 0.82, 0)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Each Greater Blessing consumes one Symbol.", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Buy from reagent vendors (~1g each).", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    lblSymFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
     
     local classX = 125
     for classID = 0, 9 do
@@ -1202,32 +1219,62 @@ function Paladin:CreateConfigRow(parent, rowIndex)
     local rowName = "CPPaladinRow"..rowIndex
     local row = CreateFrame("Frame", rowName, parent)
     row:SetWidth(730)
-    row:SetHeight(44)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*46)
+    row:SetHeight(60)  -- Height for name + capability icons + class buttons
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*62)
     
     local clearBtn = CP_CreateClearButton(row, rowName.."Clear")
-    clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
+    clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -4)
     clearBtn:SetScript("OnClick", function() Paladin:ClearButton_OnClick(this) end)
     
+    -- Paladin name (top line)
     local nameStr = row:CreateFontString(rowName.."Name", "OVERLAY", "GameFontHighlight")
-    nameStr:SetPoint("TOPLEFT", row, "TOPLEFT", 15, -14)
+    nameStr:SetPoint("TOPLEFT", row, "TOPLEFT", 15, -4)
     nameStr:SetWidth(65)
-    nameStr:SetHeight(16)
+    nameStr:SetHeight(14)
     nameStr:SetJustifyH("LEFT")
     nameStr:SetText("")
     
+    -- Symbol count (next to name)
     local symStr = row:CreateFontString(rowName.."Symbols", "OVERLAY", "GameFontHighlightSmall")
-    symStr:SetPoint("TOPLEFT", row, "TOPLEFT", 83, -14)
-    symStr:SetWidth(30)
+    symStr:SetPoint("TOPLEFT", row, "TOPLEFT", 83, -4)
+    symStr:SetWidth(25)
     symStr:SetText("")
     symStr:SetTextColor(1, 1, 0.5)
     
+    -- Capability icons row (below name, shows which blessings the paladin knows)
+    local capX = 15
+    for blessID = 0, 5 do
+        local capIcon = CreateFrame("Frame", rowName.."Cap"..blessID, row)
+        capIcon:SetWidth(16)
+        capIcon:SetHeight(16)
+        capIcon:SetPoint("TOPLEFT", row, "TOPLEFT", capX + (blessID * 17), -18)
+        
+        local tex = capIcon:CreateTexture(capIcon:GetName().."Icon", "ARTWORK")
+        tex:SetWidth(14)
+        tex:SetHeight(14)
+        tex:SetPoint("CENTER", capIcon, "CENTER", 0, 0)
+        tex:SetTexture(self.NormalBlessingIcons[blessID])
+        
+        local rankText = capIcon:CreateFontString(capIcon:GetName().."Rank", "OVERLAY", "GameFontNormalSmall")
+        rankText:SetPoint("BOTTOMRIGHT", capIcon, "BOTTOMRIGHT", 3, -3)
+        rankText:SetText("")
+        
+        capIcon:SetScript("OnEnter", function()
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            local bID = blessID
+            GameTooltip:SetText(Paladin.Blessings[bID].normal, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        capIcon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    
+    -- Class assignment buttons (start after capability icons area)
     local classX = 110
     for classID = 0, 9 do
         local btn = CreateFrame("Button", rowName.."Class"..classID, row)
         btn:SetWidth(44)
         btn:SetHeight(40)
-        btn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (classID * 48), 0)
+        btn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (classID * 48), -16)
         
         local bg = btn:CreateTexture(btn:GetName().."Background", "BACKGROUND")
         bg:SetAllPoints(btn)
@@ -1249,7 +1296,7 @@ function Paladin:CreateConfigRow(parent, rowIndex)
     local auraBtn = CreateFrame("Button", rowName.."Aura", row)
     auraBtn:SetWidth(44)
     auraBtn:SetHeight(40)
-    auraBtn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (10 * 48), 0)
+    auraBtn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (10 * 48), -16)
     
     local auraBg = auraBtn:CreateTexture(auraBtn:GetName().."Background", "BACKGROUND")
     auraBg:SetAllPoints(auraBtn)
@@ -1268,7 +1315,7 @@ function Paladin:CreateConfigRow(parent, rowIndex)
     local judgeBtn = CreateFrame("Button", rowName.."Judge", row)
     judgeBtn:SetWidth(44)
     judgeBtn:SetHeight(40)
-    judgeBtn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (10 * 48) + 50, 0)
+    judgeBtn:SetPoint("TOPLEFT", row, "TOPLEFT", classX + (10 * 48) + 50, -16)
     
     local judgeBg = judgeBtn:CreateTexture(judgeBtn:GetName().."Background", "BACKGROUND")
     judgeBg:SetAllPoints(judgeBtn)
@@ -1334,6 +1381,7 @@ function Paladin:UpdateConfigGrid()
                 end
             end
             
+            self:UpdateCapabilityIcons(rowIndex, paladinName)
             self:UpdateClassButtons(rowIndex, paladinName)
             self:UpdateAuraButton(rowIndex, paladinName)
             self:UpdateJudgeButton(rowIndex, paladinName)
@@ -1347,9 +1395,50 @@ function Paladin:UpdateConfigGrid()
         if row then row:Hide() end
     end
     
-    local newHeight = 80 + (rowIndex - 1) * 46
+    local newHeight = 80 + (rowIndex - 1) * 62  -- Adjusted for new row height
     if newHeight < 140 then newHeight = 140 end
     self.ConfigWindow:SetHeight(newHeight)
+end
+
+function Paladin:UpdateCapabilityIcons(rowIndex, paladinName)
+    local info = self.AllPaladins[paladinName]
+    
+    for blessID = 0, 5 do
+        local capIcon = getglobal("CPPaladinRow"..rowIndex.."Cap"..blessID)
+        if not capIcon then return end
+        
+        local tex = getglobal(capIcon:GetName().."Icon")
+        local rankText = getglobal(capIcon:GetName().."Rank")
+        
+        if info and info[blessID] then
+            -- Paladin has this blessing
+            tex:SetTexture(self.NormalBlessingIcons[blessID])
+            tex:SetAlpha(1.0)
+            capIcon:SetAlpha(1.0)
+            
+            -- Show rank and talent info
+            local rankStr = ""
+            if info[blessID].rank then
+                rankStr = tostring(info[blessID].rank)
+            end
+            
+            -- Add + if they have talent points in improved blessings
+            if info[blessID].talent and info[blessID].talent > 0 then
+                rankStr = rankStr .. "+"
+                rankText:SetTextColor(0, 1, 0)  -- Green for talented
+            else
+                rankText:SetTextColor(1, 1, 1)  -- White for normal
+            end
+            
+            rankText:SetText(rankStr)
+        else
+            -- Paladin doesn't have this blessing
+            tex:SetTexture(self.NormalBlessingIcons[blessID])
+            tex:SetAlpha(0.2)
+            capIcon:SetAlpha(0.3)
+            rankText:SetText("")
+        end
+    end
 end
 
 function Paladin:UpdateClassButtons(rowIndex, paladinName)
