@@ -1,41 +1,79 @@
-# PriestPower
+# ClassPower (formerly PriestPower)
 
-PriestPower is a priest-focused addon for World of Warcraft 1.12.1. Inspired by the classic PallyPower, it simplifies raid-wide buff management and provides specialized tracking for unique Priest class features.
+ClassPower is a buff management addon for World of Warcraft 1.12.1 Inspired by the classic PallyPower, it simplifies raid-wide buff management for multiple classes.
+
+## Supported Classes
+
+### Priest Module
+- **Power Word: Fortitude** / Prayer of Fortitude
+- **Divine Spirit** / Prayer of Spirit
+- **Shadow Protection** / Prayer of Shadow Protection
+- **Champion Spells** (Turtle WoW): Proclaim, Grace, Empower, Revive
+- **Enlighten** (Turtle WoW)
+
+### Druid Module
+- **Mark of the Wild** / Gift of the Wild
+- **Thorns** (with customizable target list)
+- **Emerald Blessing** (Turtle WoW)
+- **Innervate** (with mana threshold alerts)
 
 ## Features
 
-- **Smart Buff Management**: Easily assign and track **Power Word: Fortitude**, **Divine Spirit**, and **Shadow Protection** across raid groups.
-- **Turtle WoW Support**: Fully supports **Enlighten** and specialized **Champion** spells:
-  - *Proclaim Champion*
-  - *Champion's Grace*
-  - *Empower Champion*
-  - *Revive Champion*
-- **3-State Shadow Protection**: Cycle between **Prayer** (20m group), **Standard** (10m single), and **Off** to maximize mana efficiency and coverage.
+- **Smart Buff Management**: Easily assign and track buffs across raid groups.
+- **Performance Optimized**:
+  - Spell scanning only on `SPELLS_CHANGED` event (not periodic)
+  - Buff scanning every 5 seconds (only when UI is visible)
+  - Dirty flag system for efficient UI updates
 - **Modern HUD (BuffBar)**:
-  - **Dynamic Scaling**: Drag the bottom-right corner to "Zoom" the UI to your preferred size.
-  - **Smart Visibility**: Only shows buttons for missing buffs or active assignments.
-  - **Target Cycling**: Click the single-buff icons to automatically target and cast on players missing their buffs.
-- **Raid Coordination**: Syncs seamlessly with other PriestPower users to ensure everyone knows their assignments.
-- **Pure Lua UI**: Rewritten for high performance and stability, removing the dependency on legacy XML templates.
+  - **Dynamic Scaling**: Drag the bottom-right corner to resize.
+  - **Smart Visibility**: Only shows buttons for missing buffs.
+  - **Quick Casting**: Left-click for group buff, Right-click for single target.
+- **Raid Coordination**: Syncs assignments with other ClassPower users.
+- **Pure Lua UI**: High performance, no XML template dependencies.
 
-Icons will disapper once you have done your buff. 
-You can rightclick to spotbuff, left click to refresh the whole group. 
+## HUD Usage
+
+| Action | Result |
+|--------|--------|
+| Left-click buff icon | Cast Prayer/Gift (group buff) |
+| Right-click buff icon | Cast single-target buff |
+| Shift-click assignment | Toggle all 3 buffs at once (Priest) |
+
+Icons disappear once everyone in your assigned group has the buff.
+
 <img width="609" height="339" alt="bilde" src="https://github.com/user-attachments/assets/2c379d69-6ad3-4529-8a62-a8eba9d3ea97" />
-
 
 ## Commands
 
-- `/prip`: Toggle the main Configuration window.
-- `/prip reset`: Resets the UI position and scale to default settings.
-- `/prip debug`: Toggles internal debug logging.
-- `/prp`, `/priestpower`: Alternative aliases for `/prip`.
+### General
+- `/cp` or `/classpower`: Toggle the Configuration window for your class.
+- `/cp reset`: Reset UI position and scale to defaults.
+- `/cp debug`: Toggle debug logging.
+
+### Priest-specific
+- `/cp revive`: Cast Revive Champion on your assigned target.
+- `/cp checkbuffs`: Debug command to list buffs on current target.
+
+### Druid-specific
+- `/cp innervate`: Cast Innervate on your assigned target.
+- `/cp thorns`: Cast Thorns on the next person in your list missing it.
+- `/cp emerald`: Cast Emerald Blessing.
+
+### Legacy aliases
+- `/prip`, `/prp`, `/priestpower`: Work as before for Priest module.
 
 ## Configuration
 
-1. Use `/prip` to open the assignment grid.
-2. Click the icon for a class/group to cycle between **Greater Buff** (three figures), **Single Buff** (single figure), and **Off** (grey).
-3. Assignments are automatically synced with other priests in the raid.
-4. Scale the UI by dragging the resize grip (bottom-right) of either the Config window or the BuffBar.
+1. Use `/cp` to open the assignment grid for your class.
+2. Click icons to toggle assignments:
+   - **Priest**: Click individual buff icons, or Shift-click to toggle all 3.
+   - **Druid**: Click MotW icons to assign groups, click Thorns to manage target list.
+3. Assignments sync automatically with other players using ClassPower.
+4. Scale the UI by dragging the resize grip (bottom-right corner).
+
+### Druid-specific Features
+- **Thorns List**: Click the Thorns button to add/remove specific players.
+- **Innervate Threshold**: Use the slider to set a mana % threshold - the Innervate button will appear on your HUD when your target drops below this level.
 
 ## Installation
 
@@ -43,12 +81,19 @@ You can rightclick to spotbuff, left click to refresh the whole group.
 2. Extract the `PriestPower` folder into your `Interface\AddOns` directory.
 3. Ensure the folder name is exactly `PriestPower`.
 
+## Performance
+
+ClassPower is designed to be lightweight:
+- **Spell scanning**: Only when you learn/unlearn spells (not every 10 seconds)
+- **Buff scanning**: Every 5 seconds when UI is visible (not every 1 second)
+- **UI updates**: Only when data actually changes (dirty flag system)
+
 ## Credits
 
-- Inspired by the work on **PallyPower** by Relar.
+- Inspired by **PallyPower** by Relar.
+- Originally developed as PriestPower, expanded to support multiple classes.
 
 ## Support
 
-- Feel free to add feedback if you like my projects.
-- I aim to make this as good as possible. Preformence, more feature suggestions. 
+- Feedback and feature suggestions welcome!
 - https://buymeacoffee.com/slimewizzard
