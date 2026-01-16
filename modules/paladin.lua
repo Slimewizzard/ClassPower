@@ -468,11 +468,22 @@ function Paladin:ScanRaid()
             
             buffTexture = string.lower(buffTexture)
             
+            -- Wisdom: Normal=SealOfWisdom, Greater=GreaterBlessingofWisdom
             if string.find(buffTexture, "wisdom") then buffInfo[0] = true end
-            if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "might") then buffInfo[1] = true end
+            
+            -- Might: Normal=FistOfJustice, Greater=GreaterBlessingofKings (yes, really)
+            if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "greaterblessingofkings") then buffInfo[1] = true end
+            
+            -- Salvation: Normal=SealOfSalvation, Greater=GreaterBlessingofSalvation
             if string.find(buffTexture, "salvation") then buffInfo[2] = true end
-            if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "light") then buffInfo[3] = true end
-            if string.find(buffTexture, "magearmor") or string.find(buffTexture, "kings") then buffInfo[4] = true end
+            
+            -- Light: Normal=PrayerOfHealing02, Greater=GreaterBlessingofLight
+            if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "greaterblessingoflight") then buffInfo[3] = true end
+            
+            -- Kings: Normal=MageArmor, Greater=Magic_GreaterBlessingofKings (note: Magic_ prefix)
+            if string.find(buffTexture, "magearmor") or string.find(buffTexture, "magic_greaterblessingofkings") then buffInfo[4] = true end
+            
+            -- Sanctuary: Normal=LightningShield, Greater=GreaterBlessingofSanctuary
             if string.find(buffTexture, "lightningshield") or string.find(buffTexture, "sanctuary") then buffInfo[5] = true end
             
             b = b + 1
@@ -504,12 +515,23 @@ function Paladin:ScanRaid()
             if not buffTexture then break end
             buffTexture = string.lower(buffTexture)
             
+            -- Wisdom: Normal=SealOfWisdom, Greater=GreaterBlessingofWisdom
             if string.find(buffTexture, "wisdom") then buffInfo[0] = true end
-            if string.find(buffTexture, "might") then buffInfo[1] = true end
+            
+            -- Might: Normal=FistOfJustice, Greater=GreaterBlessingofKings
+            if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "greaterblessingofkings") then buffInfo[1] = true end
+            
+            -- Salvation
             if string.find(buffTexture, "salvation") then buffInfo[2] = true end
-            if string.find(buffTexture, "light") then buffInfo[3] = true end
-            if string.find(buffTexture, "kings") or string.find(buffTexture, "magearmor") then buffInfo[4] = true end
-            if string.find(buffTexture, "sanctuary") then buffInfo[5] = true end
+            
+            -- Light: Normal=PrayerOfHealing02, Greater=GreaterBlessingofLight
+            if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "greaterblessingoflight") then buffInfo[3] = true end
+            
+            -- Kings: Normal=MageArmor, Greater=Magic_GreaterBlessingofKings
+            if string.find(buffTexture, "magearmor") or string.find(buffTexture, "magic_greaterblessingofkings") then buffInfo[4] = true end
+            
+            -- Sanctuary
+            if string.find(buffTexture, "lightningshield") or string.find(buffTexture, "sanctuary") then buffInfo[5] = true end
             
             b = b + 1
         end
