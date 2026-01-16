@@ -918,8 +918,8 @@ function Priest:CreateConfigWindow()
     end
     
     local f = CreateFrame("Frame", "ClassPowerPriestConfig", UIParent)
-    f:SetWidth(920)
-    f:SetHeight(400)
+    f:SetWidth(860)
+    f:SetHeight(450)
     f:SetPoint("CENTER", 0, 0)
     f:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -959,34 +959,29 @@ function Priest:CreateConfigWindow()
     end)
     
     -- Header Row
-    local headerY = -45
+    local headerY = -48
     
     -- "Priest" label
-    local lblPriest = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblPriest:SetPoint("TOPLEFT", f, "TOPLEFT", 30, headerY)
+    local lblPriest = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lblPriest:SetPoint("TOPLEFT", f, "TOPLEFT", 35, headerY)
     lblPriest:SetText("Priest")
     
     -- "Capabilities" label
-    local lblCaps = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblCaps:SetPoint("TOPLEFT", f, "TOPLEFT", 130, headerY)
+    local lblCaps = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lblCaps:SetPoint("TOPLEFT", f, "TOPLEFT", 115, headerY)
     lblCaps:SetText("Spells")
     
     -- Group headers (1-8)
     for g = 1, 8 do
-        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 240 + (g-1)*70, headerY)
-        lbl:SetText("Grp "..g)
+        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 230 + (g-1)*68, headerY)
+        lbl:SetText("G"..g)
     end
     
     -- Champion header
-    local lblChamp = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblChamp:SetPoint("TOPLEFT", f, "TOPLEFT", 810, headerY)
+    local lblChamp = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lblChamp:SetPoint("TOPLEFT", f, "TOPLEFT", 785, headerY)
     lblChamp:SetText("Champ")
-    
-    -- Enlighten header
-    local lblEnlight = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lblEnlight:SetPoint("TOPLEFT", f, "TOPLEFT", 870, headerY)
-    lblEnlight:SetText("Enlt")
     
     -- Create priest rows (up to 10)
     for i = 1, 10 do
@@ -997,7 +992,7 @@ function Priest:CreateConfigWindow()
     if CP_PerUser.ConfigScale then
         f:SetScale(CP_PerUser.ConfigScale)
     else
-        f:SetScale(0.8)
+        f:SetScale(1.0)
     end
     
     f:Hide()
@@ -1007,9 +1002,9 @@ end
 function Priest:CreateConfigRow(parent, rowIndex)
     local rowName = "CPPriestRow"..rowIndex
     local row = CreateFrame("Frame", rowName, parent)
-    row:SetWidth(880)
-    row:SetHeight(42)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, -55 - (rowIndex-1)*44)
+    row:SetWidth(820)
+    row:SetHeight(44)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, -65 - (rowIndex-1)*46)
     
     -- Clear Button
     local clearBtn = CP_CreateClearButton(row, rowName.."Clear", function()
@@ -1018,39 +1013,46 @@ function Priest:CreateConfigRow(parent, rowIndex)
     clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
     
     -- Priest Name
-    local nameStr = row:CreateFontString(rowName.."Name", "OVERLAY", "GameFontHighlightSmall")
-    nameStr:SetPoint("TOPLEFT", row, "TOPLEFT", 18, -15)
-    nameStr:SetWidth(100)
+    local nameStr = row:CreateFontString(rowName.."Name", "OVERLAY", "GameFontHighlight")
+    nameStr:SetPoint("TOPLEFT", row, "TOPLEFT", 20, -14)
+    nameStr:SetWidth(85)
     nameStr:SetHeight(16)
     nameStr:SetJustifyH("LEFT")
     nameStr:SetText("")
     
-    -- Capability Icons Frame (Fort, Spirit, Shadow, Proclaim, Grace, Empower, Revive, Enlighten)
+    -- Capability Icons Frame (Fort, Spirit, Shadow, Proclaim, Grace, Empower, Revive)
     local caps = CreateFrame("Frame", rowName.."Caps", row)
-    caps:SetWidth(130)
-    caps:SetHeight(20)
-    caps:SetPoint("TOPLEFT", row, "TOPLEFT", 110, -12)
+    caps:SetWidth(120)
+    caps:SetHeight(22)
+    caps:SetPoint("TOPLEFT", row, "TOPLEFT", 105, -12)
     
     local function CreateCapIcon(suffix, xOffset)
         local btn = CP_CreateCapabilityIcon(caps, rowName.."Cap"..suffix)
+        btn:SetWidth(16)
+        btn:SetHeight(16)
+        local icon = getglobal(btn:GetName().."Icon")
+        if icon then
+            icon:SetWidth(14)
+            icon:SetHeight(14)
+        end
         btn:SetPoint("TOPLEFT", caps, "TOPLEFT", xOffset, 0)
         return btn
     end
     
     CreateCapIcon("Fort", 0)
-    CreateCapIcon("Spirit", 18)
-    CreateCapIcon("Shadow", 36)
-    CreateCapIcon("Proclaim", 58)
-    CreateCapIcon("Grace", 76)
-    CreateCapIcon("Empower", 94)
-    CreateCapIcon("Revive", 112)
+    CreateCapIcon("Spirit", 16)
+    CreateCapIcon("Shadow", 32)
+    CreateCapIcon("Proclaim", 52)
+    CreateCapIcon("Grace", 68)
+    CreateCapIcon("Empower", 84)
+    CreateCapIcon("Revive", 100)
     
     -- Group Buttons (1-8) - Each group has Fort/Spirit/Shadow sub-buttons
     for g = 1, 8 do
         local grpFrame = CreateFrame("Frame", rowName.."Group"..g, row)
-        grpFrame:SetWidth(68)
+        grpFrame:SetWidth(64)
         grpFrame:SetHeight(42)
-        grpFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 220 + (g-1)*70, 0)
+        grpFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 215 + (g-1)*68, 0)
         grpFrame:SetBackdrop({
             bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -1060,30 +1062,97 @@ function Priest:CreateConfigRow(parent, rowIndex)
         grpFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
         
         -- Fort button
-        local btnFort = CP_CreateSubButton(grpFrame, rowName.."Group"..g.."Fort")
+        local btnFort = CreateFrame("Button", rowName.."Group"..g.."Fort", grpFrame)
+        btnFort:SetWidth(20)
+        btnFort:SetHeight(20)
         btnFort:SetPoint("LEFT", grpFrame, "LEFT", 2, 0)
+        
+        local fortBg = btnFort:CreateTexture(btnFort:GetName().."Background", "BACKGROUND")
+        fortBg:SetAllPoints(btnFort)
+        fortBg:SetTexture(0.1, 0.1, 0.1, 0.5)
+        
+        local fortIcon = btnFort:CreateTexture(btnFort:GetName().."Icon", "OVERLAY")
+        fortIcon:SetWidth(18)
+        fortIcon:SetHeight(18)
+        fortIcon:SetPoint("CENTER", btnFort, "CENTER", 0, 0)
+        
+        local fortTxt = btnFort:CreateFontString(btnFort:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
+        fortTxt:SetPoint("BOTTOM", btnFort, "BOTTOM", 0, -10)
+        fortTxt:SetJustifyH("CENTER")
+        
+        btnFort:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btnFort:SetScript("OnClick", function() Priest:SubButton_OnClick(this) end)
         btnFort:SetScript("OnEnter", function() Priest:SubButton_OnEnter(this) end)
         btnFort:SetScript("OnLeave", function() GameTooltip:Hide() end)
         
         -- Spirit button
-        local btnSpirit = CP_CreateSubButton(grpFrame, rowName.."Group"..g.."Spirit")
-        btnSpirit:SetPoint("LEFT", btnFort, "RIGHT", 0, 0)
+        local btnSpirit = CreateFrame("Button", rowName.."Group"..g.."Spirit", grpFrame)
+        btnSpirit:SetWidth(20)
+        btnSpirit:SetHeight(20)
+        btnSpirit:SetPoint("LEFT", btnFort, "RIGHT", 1, 0)
+        
+        local spiritBg = btnSpirit:CreateTexture(btnSpirit:GetName().."Background", "BACKGROUND")
+        spiritBg:SetAllPoints(btnSpirit)
+        spiritBg:SetTexture(0.1, 0.1, 0.1, 0.5)
+        
+        local spiritIcon = btnSpirit:CreateTexture(btnSpirit:GetName().."Icon", "OVERLAY")
+        spiritIcon:SetWidth(18)
+        spiritIcon:SetHeight(18)
+        spiritIcon:SetPoint("CENTER", btnSpirit, "CENTER", 0, 0)
+        
+        local spiritTxt = btnSpirit:CreateFontString(btnSpirit:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
+        spiritTxt:SetPoint("BOTTOM", btnSpirit, "BOTTOM", 0, -10)
+        spiritTxt:SetJustifyH("CENTER")
+        
+        btnSpirit:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btnSpirit:SetScript("OnClick", function() Priest:SubButton_OnClick(this) end)
         btnSpirit:SetScript("OnEnter", function() Priest:SubButton_OnEnter(this) end)
         btnSpirit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         
         -- Shadow button
-        local btnShadow = CP_CreateSubButton(grpFrame, rowName.."Group"..g.."Shadow")
-        btnShadow:SetPoint("LEFT", btnSpirit, "RIGHT", 0, 0)
+        local btnShadow = CreateFrame("Button", rowName.."Group"..g.."Shadow", grpFrame)
+        btnShadow:SetWidth(20)
+        btnShadow:SetHeight(20)
+        btnShadow:SetPoint("LEFT", btnSpirit, "RIGHT", 1, 0)
+        
+        local shadowBg = btnShadow:CreateTexture(btnShadow:GetName().."Background", "BACKGROUND")
+        shadowBg:SetAllPoints(btnShadow)
+        shadowBg:SetTexture(0.1, 0.1, 0.1, 0.5)
+        
+        local shadowIcon = btnShadow:CreateTexture(btnShadow:GetName().."Icon", "OVERLAY")
+        shadowIcon:SetWidth(18)
+        shadowIcon:SetHeight(18)
+        shadowIcon:SetPoint("CENTER", btnShadow, "CENTER", 0, 0)
+        
+        local shadowTxt = btnShadow:CreateFontString(btnShadow:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
+        shadowTxt:SetPoint("BOTTOM", btnShadow, "BOTTOM", 0, -10)
+        shadowTxt:SetJustifyH("CENTER")
+        
+        btnShadow:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btnShadow:SetScript("OnClick", function() Priest:SubButton_OnClick(this) end)
         btnShadow:SetScript("OnEnter", function() Priest:SubButton_OnEnter(this) end)
         btnShadow:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     
     -- Champion Button
-    local champBtn = CP_CreateSubButton(row, rowName.."Champ")
-    champBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 795, -9)
+    local champBtn = CreateFrame("Button", rowName.."Champ", row)
+    champBtn:SetWidth(24)
+    champBtn:SetHeight(24)
+    champBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 770, -8)
+    
+    local champBg = champBtn:CreateTexture(champBtn:GetName().."Background", "BACKGROUND")
+    champBg:SetAllPoints(champBtn)
+    champBg:SetTexture(0.1, 0.1, 0.1, 0.5)
+    
+    local champIcon = champBtn:CreateTexture(champBtn:GetName().."Icon", "OVERLAY")
+    champIcon:SetWidth(22)
+    champIcon:SetHeight(22)
+    champIcon:SetPoint("CENTER", champBtn, "CENTER", 0, 0)
+    
+    local champTxt = champBtn:CreateFontString(champBtn:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
+    champTxt:SetPoint("CENTER", champBtn, "CENTER", 0, 0)
+    
+    champBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     champBtn:SetScript("OnClick", function() Priest:ChampButton_OnClick(this) end)
     champBtn:SetScript("OnEnter", function() Priest:ChampButton_OnEnter(this) end)
     champBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1093,19 +1162,6 @@ function Priest:CreateConfigRow(parent, rowIndex)
     champName:SetPoint("TOP", champBtn, "BOTTOM", 0, -2)
     champName:SetWidth(50)
     champName:SetText("")
-    
-    -- Enlighten Button
-    local enlightBtn = CP_CreateSubButton(row, rowName.."Enlighten")
-    enlightBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 855, -9)
-    enlightBtn:SetScript("OnClick", function() Priest:EnlightenButton_OnClick(this) end)
-    enlightBtn:SetScript("OnEnter", function() Priest:EnlightenButton_OnEnter(this) end)
-    enlightBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    
-    -- Enlighten Name Label
-    local enlightName = row:CreateFontString(rowName.."EnlightenName", "OVERLAY", "GameFontHighlightSmall")
-    enlightName:SetPoint("TOP", enlightBtn, "BOTTOM", 0, -2)
-    enlightName:SetWidth(50)
-    enlightName:SetText("")
     
     row:Hide()
     return row
@@ -1123,9 +1179,15 @@ function Priest:UpdateConfigGrid()
         if row then
             row:Show()
             
-            -- Set priest name
+            -- Set priest name (truncate if needed)
             local nameStr = getglobal("CPPriestRow"..rowIndex.."Name")
-            if nameStr then nameStr:SetText(priestName) end
+            if nameStr then 
+                local displayName = priestName
+                if string.len(priestName) > 12 then
+                    displayName = string.sub(priestName, 1, 11)..". "
+                end
+                nameStr:SetText(displayName) 
+            end
             
             -- Show/hide clear button based on permission
             local clearBtn = getglobal("CPPriestRow"..rowIndex.."Clear")
@@ -1145,9 +1207,6 @@ function Priest:UpdateConfigGrid()
             
             -- Update champion button
             self:UpdateChampButton(rowIndex, priestName)
-            
-            -- Update enlighten button
-            self:UpdateEnlightenButton(rowIndex, priestName)
         end
         
         rowIndex = rowIndex + 1
@@ -1160,8 +1219,8 @@ function Priest:UpdateConfigGrid()
     end
     
     -- Adjust window height
-    local newHeight = 70 + (rowIndex - 1) * 44
-    if newHeight < 120 then newHeight = 120 end
+    local newHeight = 80 + (rowIndex - 1) * 46
+    if newHeight < 140 then newHeight = 140 end
     self.ConfigWindow:SetHeight(newHeight)
 end
 
@@ -1286,38 +1345,6 @@ function Priest:UpdateChampButton(rowIndex, priestName)
         local status = self.CurrentBuffsByName[target]
         local text = getglobal(btn:GetName().."Text")
         if status and status.hasProclaim then
-            text:SetText("")
-        else
-            text:SetText("|cffff0000!|r")
-        end
-    else
-        icon:Show()
-        btn:SetAlpha(0.3)
-        if nameLabel then nameLabel:SetText("") end
-        getglobal(btn:GetName().."Text"):SetText("")
-    end
-end
-
-function Priest:UpdateEnlightenButton(rowIndex, priestName)
-    local btn = getglobal("CPPriestRow"..rowIndex.."Enlighten")
-    local nameLabel = getglobal("CPPriestRow"..rowIndex.."EnlightenName")
-    if not btn then return end
-    
-    local icon = getglobal(btn:GetName().."Icon")
-    local target = self.LegacyAssignments[priestName] and self.LegacyAssignments[priestName]["Enlighten"]
-    
-    icon:SetTexture(self.ChampionIcons["Enlighten"])
-    
-    if target then
-        icon:Show()
-        btn:SetAlpha(1.0)
-        if nameLabel then 
-            nameLabel:SetText(string.sub(target, 1, 8)) 
-        end
-        
-        local status = self.CurrentBuffsByName[target]
-        local text = getglobal(btn:GetName().."Text")
-        if status and status.hasEnlighten then
             text:SetText("")
         else
             text:SetText("|cffff0000!|r")
@@ -1466,47 +1493,6 @@ function Priest:ChampButton_OnEnter(btn)
     GameTooltip:Show()
 end
 
-function Priest:EnlightenButton_OnClick(btn)
-    local btnName = btn:GetName()
-    local _, _, rowIdx = string.find(btnName, "CPPriestRow(%d+)Enlighten")
-    if not rowIdx then return end
-    
-    local nameStr = getglobal("CPPriestRow"..rowIdx.."Name")
-    local priestName = nameStr and nameStr:GetText()
-    if not priestName then return end
-    
-    -- Permission check
-    if not ClassPower_IsPromoted() and priestName ~= UnitName("player") then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You must be promoted to assign others.")
-        return
-    end
-    
-    self.ContextName = priestName
-    self.AssignMode = "Enlighten"
-    
-    ToggleDropDownMenu(1, nil, ClassPowerPriestDropDown, btn, 0, 0)
-end
-
-function Priest:EnlightenButton_OnEnter(btn)
-    local btnName = btn:GetName()
-    local _, _, rowIdx = string.find(btnName, "CPPriestRow(%d+)Enlighten")
-    if not rowIdx then return end
-    
-    local nameStr = getglobal("CPPriestRow"..rowIdx.."Name")
-    local priestName = nameStr and nameStr:GetText()
-    
-    local target = self.LegacyAssignments[priestName] and self.LegacyAssignments[priestName]["Enlighten"]
-    
-    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Enlighten Assignment")
-    if target then
-        GameTooltip:AddLine("Target: "..target, 0, 1, 0)
-    else
-        GameTooltip:AddLine("Click to assign", 0.7, 0.7, 0.7)
-    end
-    GameTooltip:Show()
-end
-
 -----------------------------------------------------------------------------------
 -- Update UI (delegates)
 -----------------------------------------------------------------------------------
@@ -1524,7 +1510,7 @@ function Priest:ResetUI()
     CP_PerUser.X = nil
     CP_PerUser.Y = nil
     CP_PerUser.Scale = 0.7
-    CP_PerUser.ConfigScale = 0.8
+    CP_PerUser.ConfigScale = 1.0
     
     if self.BuffBar then
         self.BuffBar:ClearAllPoints()
@@ -1535,14 +1521,14 @@ function Priest:ResetUI()
     if self.ConfigWindow then
         self.ConfigWindow:ClearAllPoints()
         self.ConfigWindow:SetPoint("CENTER", 0, 0)
-        self.ConfigWindow:SetScale(0.8)
+        self.ConfigWindow:SetScale(1.0)
     end
     
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: UI reset to defaults.")
 end
 
 -----------------------------------------------------------------------------------
--- Champion/Enlighten Dropdown
+-- Champion Dropdown
 -----------------------------------------------------------------------------------
 
 function Priest:ChampDropDown_Initialize(level)
@@ -1628,15 +1614,11 @@ function Priest:AssignTarget_OnClick()
     if targetName == "CLEAR" then
         self.LegacyAssignments[pname][mode] = nil
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared "..mode.." for "..pname)
-        if mode == "Champ" then
-            ClassPower_SendMessage("ASSIGNCHAMP "..pname.." nil")
-        end
+        ClassPower_SendMessage("ASSIGNCHAMP "..pname.." nil")
     else
         self.LegacyAssignments[pname][mode] = targetName
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..pname.." "..mode.." = "..targetName)
-        if mode == "Champ" then
-            ClassPower_SendMessage("ASSIGNCHAMP "..pname.." "..targetName)
-        end
+        ClassPower_SendMessage("ASSIGNCHAMP "..pname.." "..targetName)
     end
     
     self:UpdateUI()
