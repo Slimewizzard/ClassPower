@@ -1,8 +1,13 @@
 ## Interface: 11200
-## Title: PriestPower
-## Notes: A priest addon for Turtle WoW (1.12.1)
+## Title: ClassPower (PriestPower)
+## Notes: Class buff management for Turtle WoW (1.12.1) - Priest, Druid, Mage, Shaman, Paladin
 ## Author: Slimewizzard
-## Version: 1.0
-## SavedVariablesPerCharacter: PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser
-localization.lua
-PriestPower.lua
+## Version: 2.0
+## SavedVariablesPerCharacter: CP_PerUser, PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser
+
+ClassPower_Core.lua
+modules\priest.lua
+modules\druid.lua
+modules\mage.lua
+modules\shaman.lua
+modules\paladin.lua
