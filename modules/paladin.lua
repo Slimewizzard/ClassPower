@@ -132,7 +132,7 @@ Paladin.Judgements = {
 }
 
 Paladin.JudgementIcons = {
-    [0] = "Interface\\Icons\\Spell_Holy_HolyBolt",
+    [0] = "Interface\\Icons\\Spell_Holy_HealingAura",  -- Judgement of Light (Seal of Light icon)
     [1] = "Interface\\Icons\\Spell_Holy_RighteousnessAura",
     [2] = "Interface\\Icons\\Spell_Holy_HolySmite",
     [3] = "Interface\\Icons\\Spell_Holy_SealOfWrath",
@@ -738,10 +738,29 @@ function Paladin:CanBuff(paladinName, blessingID)
     if blessingID < 0 or blessingID > 5 then return true end
     
     local info = self.AllPaladins[paladinName]
-    if not info then return false end
+    
+    -- If we don't have info about this paladin's blessings yet,
+    -- assume they can cast all blessings (we'll find out when they sync)
+    if not info then return true end
     
     -- Check if paladin has this blessing (either normal or greater)
+    -- If info[blessingID] exists, they have it
+    -- If info doesn't have numeric keys yet (just joined), allow all
     if info[blessingID] then
+        return true
+    end
+    
+    -- Check if this paladin has ANY blessing info - if not, allow all
+    local hasAnyBlessingInfo = false
+    for id = 0, 5 do
+        if info[id] ~= nil then
+            hasAnyBlessingInfo = true
+            break
+        end
+    end
+    
+    -- If we have no blessing info for this paladin, assume they can do everything
+    if not hasAnyBlessingInfo then
         return true
     end
     
@@ -948,7 +967,7 @@ function Paladin:SaveBuffBarPosition()
 end
 
 function Paladin:SaveConfigPosition()
-    if not self.ConfigWindow then return end
+    if not self.ConfigWindow then return
     CP_PerUser.PaladinConfigScale = self.ConfigWindow:GetScale()
 end
 
