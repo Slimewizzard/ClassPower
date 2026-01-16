@@ -168,6 +168,9 @@ Paladin.ContextClass = nil
 function Paladin:OnLoad()
     CP_Debug("Paladin:OnLoad()")
     
+    -- Load saved assignments before anything else
+    self:LoadAssignments()
+    
     -- Initial spell scan
     self:ScanSpells()
     self:ScanRaid()
@@ -810,6 +813,11 @@ function Paladin:CycleBlessingForward(paladinName, classID)
     self.Assignments[paladinName][classID] = cur
     ClassPower_SendMessage("PASSIGN "..paladinName.." "..classID.." "..cur)
     self:UpdateUI()
+    
+    -- Save if this is for the current player
+    if paladinName == UnitName("player") then
+        self:SaveAssignments()
+    end
 end
 
 function Paladin:CycleBlessingForwardAllClasses(paladinName, referenceClassID)
@@ -849,6 +857,11 @@ function Paladin:CycleBlessingForwardAllClasses(paladinName, referenceClassID)
     end
     
     self:UpdateUI()
+    
+    -- Save if this is for the current player
+    if paladinName == UnitName("player") then
+        self:SaveAssignments()
+    end
 end
 
 -----------------------------------------------------------------------------------
@@ -1731,6 +1744,11 @@ function Paladin:AuraDropDown_OnClick(auraID)
     
     self:UpdateUI()
     CloseDropDownMenus()
+    
+    -- Save if this is for the current player
+    if pname == UnitName("player") then
+        self:SaveAssignments()
+    end
 end
 
 function Paladin:JudgeDropDown_Initialize(level)
@@ -1765,6 +1783,11 @@ function Paladin:JudgeDropDown_OnClick(judgeID)
     
     self:UpdateUI()
     CloseDropDownMenus()
+    
+    -- Save if this is for the current player
+    if pname == UnitName("player") then
+        self:SaveAssignments()
+    end
 end
 
 -----------------------------------------------------------------------------------
@@ -1828,6 +1851,62 @@ function Paladin:ReportAssignments()
     end
     
     SendChatMessage("--- End Assignments ---", msgType)
+end
+
+-----------------------------------------------------------------------------------
+-- Persistence (Save/Load Assignments)
+-----------------------------------------------------------------------------------
+
+function Paladin:SaveAssignments()
+    local pname = UnitName("player")
+    if not pname then return end
+    
+    -- Initialize saved variable if needed
+    if not CP_PaladinAssignments then
+        CP_PaladinAssignments = {}
+    end
+    
+    -- Save current player's assignments
+    CP_PaladinAssignments.Assignments = self.Assignments[pname] or {}
+    CP_PaladinAssignments.AuraAssignment = self.AuraAssignments[pname]
+    CP_PaladinAssignments.JudgementAssignment = self.JudgementAssignments[pname]
+    
+    CP_Debug("Paladin: Saved assignments for "..pname)
+end
+
+function Paladin:LoadAssignments()
+    local pname = UnitName("player")
+    if not pname then return end
+    
+    -- Check if we have saved data
+    if not CP_PaladinAssignments then
+        CP_Debug("Paladin: No saved assignments found")
+        return
+    end
+    
+    -- Load assignments for current player
+    if CP_PaladinAssignments.Assignments then
+        self.Assignments[pname] = {}
+        for classID = 0, 9 do
+            local bid = CP_PaladinAssignments.Assignments[classID]
+            if bid ~= nil then
+                self.Assignments[pname][classID] = bid
+            else
+                self.Assignments[pname][classID] = -1
+            end
+        end
+        CP_Debug("Paladin: Loaded blessing assignments")
+    end
+    
+    if CP_PaladinAssignments.AuraAssignment ~= nil then
+        self.AuraAssignments[pname] = CP_PaladinAssignments.AuraAssignment
+        CP_Debug("Paladin: Loaded aura assignment: "..tostring(CP_PaladinAssignments.AuraAssignment))
+    end
+    
+    if CP_PaladinAssignments.JudgementAssignment ~= nil then
+        self.JudgementAssignments[pname] = CP_PaladinAssignments.JudgementAssignment
+        CP_Debug("Paladin: Loaded judgement assignment: "..tostring(CP_PaladinAssignments.JudgementAssignment))
+    end
 end
 
 -----------------------------------------------------------------------------------
