@@ -21,12 +21,13 @@ Druid.BuffIcons = {
 }
 
 Druid.BuffIconsGroup = {
-    [0] = "Interface\\Icons\\Spell_Nature_GiftOfTheWild",        -- Gift of the Wild
+    [0] = "Interface\\Icons\\Spell_Nature_Regeneration",         -- Gift of the Wild (same icon as MotW)
 }
 
 Druid.SpecialIcons = {
     ["Emerald"] = "Interface\\Icons\\Spell_Nature_ProtectionformNature",
     ["Innervate"] = "Interface\\Icons\\Spell_Nature_Lightning",
+    ["Thorns"] = "Interface\\Icons\\Spell_Nature_Thorns",
 }
 
 -- Buff type constants
@@ -42,6 +43,8 @@ Druid.CurrentBuffs = {}
 Druid.CurrentBuffsByName = {}
 Druid.Assignments = {}
 Druid.LegacyAssignments = {}
+Druid.ThornsList = {}  -- New: list of players assigned for Thorns
+Druid.InnervateThreshold = {}  -- Mana % threshold for Innervate (0-100)
 Druid.RankInfo = {}
 
 -- Timers
@@ -62,6 +65,11 @@ Druid.AssignMode = "Innervate"
 function Druid:OnLoad()
     CP_Debug("Druid:OnLoad()")
     
+    -- Load saved Thorns list
+    if CP_PerUser.DruidThornsList then
+        self.ThornsList = CP_PerUser.DruidThornsList
+    end
+    
     -- Initial spell scan
     self:ScanSpells()
     self:ScanRaid()
@@ -74,7 +82,7 @@ function Druid:OnLoad()
     if not getglobal("ClassPowerDruidDropDown") then
         CreateFrame("Frame", "ClassPowerDruidDropDown", UIParent, "UIDropDownMenuTemplate")
     end
-    UIDropDownMenu_Initialize(ClassPowerDruidDropDown, function(level) Druid:InnervateDropDown_Initialize(level) end, "MENU")
+    UIDropDownMenu_Initialize(ClassPowerDruidDropDown, function(level) Druid:TargetDropDown_Initialize(level) end, "MENU")
     
     -- Request sync from other druids
     self:RequestSync()
@@ -161,6 +169,27 @@ function Druid:OnSlashCommand(msg)
         end
     elseif msg == "emerald" then
         CastSpellByName(self.Spells.EMERALD)
+    elseif msg == "thorns" then
+        -- Cast thorns on first person in list missing it
+        local pname = UnitName("player")
+        local thornsList = self.ThornsList[pname]
+        if thornsList then
+            for _, target in ipairs(thornsList) do
+                local status = self.CurrentBuffsByName[target]
+                if status and not status.hasThorns and not status.dead then
+                    ClearTarget()
+                    TargetByName(target, true)
+                    if UnitName("target") == target then
+                        CastSpellByName(self.Spells.THORNS)
+                        TargetLastTarget()
+                        return
+                    end
+                end
+            end
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: All Thorns targets are buffed!")
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Thorns targets assigned!")
+        end
     elseif msg == "checkbuffs" then
         local unit = "player"
         if UnitExists("target") then unit = "target" end
@@ -276,14 +305,26 @@ function Druid:ScanRaid()
             
             local b = 1
             while true do
-                local bname = UnitBuff(unit, b)
-                if not bname then break end
+                local buffTexture = UnitBuff(unit, b)
+                if not buffTexture then break end
                 
-                bname = string.lower(bname)
+                -- UnitBuff returns the texture path, convert to lowercase for matching
+                buffTexture = string.lower(buffTexture)
                 
-                if string.find(bname, "wild") or string.find(bname, "gift") then buffInfo.hasMotW = true end
-                if string.find(bname, "thorns") then buffInfo.hasThorns = true end
-                if string.find(bname, "emerald") or string.find(bname, "protectionformnature") then buffInfo.hasEmerald = true end
+                -- Mark of the Wild & Gift of the Wild both use: Spell_Nature_Regeneration
+                if string.find(buffTexture, "regeneration") then 
+                    buffInfo.hasMotW = true 
+                end
+                
+                -- Thorns: Spell_Nature_Thorns
+                if string.find(buffTexture, "thorns") then 
+                    buffInfo.hasThorns = true 
+                end
+                
+                -- Emerald Blessing: Spell_Nature_ProtectionformNature
+                if string.find(buffTexture, "protectionformnature") then 
+                    buffInfo.hasEmerald = true 
+                end
                 
                 b = b + 1
             end
@@ -316,6 +357,77 @@ function Druid:ScanRaid()
             self.Assignments[name] = nil
         end
     end
+end
+
+-----------------------------------------------------------------------------------
+-- Thorns List Management
+-----------------------------------------------------------------------------------
+
+function Druid:AddToThornsList(druidName, targetName)
+    if not druidName or not targetName then return end
+    
+    self.ThornsList[druidName] = self.ThornsList[druidName] or {}
+    
+    -- Check if already in list
+    for _, name in ipairs(self.ThornsList[druidName]) do
+        if name == targetName then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..targetName.." is already in Thorns list.")
+            return
+        end
+    end
+    
+    table.insert(self.ThornsList[druidName], targetName)
+    self:SaveThornsList()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added "..targetName.." to Thorns list.")
+end
+
+function Druid:RemoveFromThornsList(druidName, targetName)
+    if not druidName or not targetName then return end
+    if not self.ThornsList[druidName] then return end
+    
+    for i, name in ipairs(self.ThornsList[druidName]) do
+        if name == targetName then
+            table.remove(self.ThornsList[druidName], i)
+            self:SaveThornsList()
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Removed "..targetName.." from Thorns list.")
+            return
+        end
+    end
+end
+
+function Druid:ClearThornsList(druidName)
+    if not druidName then return end
+    self.ThornsList[druidName] = {}
+    self:SaveThornsList()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared Thorns list.")
+end
+
+function Druid:SaveThornsList()
+    CP_PerUser.DruidThornsList = self.ThornsList
+end
+
+function Druid:GetThornsListCount(druidName)
+    if not self.ThornsList[druidName] then return 0 end
+    return table.getn(self.ThornsList[druidName])
+end
+
+function Druid:GetThornsMissing(druidName)
+    if not self.ThornsList[druidName] then return 0, 0 end
+    
+    local missing = 0
+    local total = 0
+    
+    for _, targetName in ipairs(self.ThornsList[druidName]) do
+        local status = self.CurrentBuffsByName[targetName]
+        if status then
+            total = total + 1
+            if not status.hasThorns and not status.dead then
+                missing = missing + 1
+            end
+        end
+    end
+    
+    return missing, total
 end
 
 -----------------------------------------------------------------------------------
@@ -422,6 +534,8 @@ function Druid:OnAddonMessage(sender, msg)
             if sender == target or ClassPower_IsPromoted(sender) then
                 self.Assignments[target] = {}
                 self.LegacyAssignments[target] = {}
+                self.ThornsList[target] = {}
+                self:SaveThornsList()
                 if target == UnitName("player") then
                     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Assignments cleared by "..sender)
                 end
@@ -479,8 +593,8 @@ function Druid:CreateBuffBar()
         Druid:SaveBuffBarPosition()
     end)
     
-    -- Create rows: 8 groups + 1 Emerald row
-    for i = 1, 9 do
+    -- Create rows: 8 groups + 1 Thorns row + 1 Emerald row
+    for i = 1, 10 do
         local row = self:CreateHUDRow(f, "ClassPowerDruidHUDRow"..i, i)
         row:Hide()
     end
@@ -510,6 +624,8 @@ function Druid:CreateHUDRow(parent, name, id)
     label:SetPoint("LEFT", f, "LEFT", 5, 0)
     
     if id == 9 then
+        label:SetText("Thrns")
+    elseif id == 10 then
         label:SetText("Emrld")
     else
         label:SetText("Grp "..id)
@@ -519,13 +635,17 @@ function Druid:CreateHUDRow(parent, name, id)
         local motw = CP_CreateHUDButton(f, name.."MotW")
         motw:SetPoint("LEFT", f, "LEFT", 40, 0)
         motw:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
-        
-        local thorns = CP_CreateHUDButton(f, name.."Thorns")
-        thorns:SetPoint("LEFT", motw, "RIGHT", 2, 0)
-        thorns:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
     end
     
     if id == 9 then
+        -- Thorns row - shows missing thorns from list
+        local thorns = CP_CreateHUDButton(f, name.."Thorns")
+        thorns:SetPoint("LEFT", f, "LEFT", 40, 0)
+        getglobal(thorns:GetName().."Icon"):SetTexture(self.SpecialIcons["Thorns"])
+        thorns:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
+    end
+    
+    if id == 10 then
         local emerald = CP_CreateHUDButton(f, name.."Emerald")
         emerald:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(emerald:GetName().."Icon"):SetTexture(self.SpecialIcons["Emerald"])
@@ -555,13 +675,27 @@ function Druid:UpdateBuffBar()
     local lastRow = nil
     local count = 0
     
-    for i = 1, 9 do
+    for i = 1, 10 do
         local row = getglobal("ClassPowerDruidHUDRow"..i)
         if not row then break end
         
         local showRow = false
         
         if i == 9 then
+            -- Thorns List row
+            local btnThorns = getglobal(row:GetName().."Thorns")
+            local missing, total = self:GetThornsMissing(pname)
+            
+            if total > 0 and missing > 0 then
+                btnThorns:Show()
+                btnThorns.tooltipText = "Thorns List"
+                getglobal(btnThorns:GetName().."Text"):SetText((total-missing).."/"..total)
+                getglobal(btnThorns:GetName().."Text"):SetTextColor(1,0,0)
+                showRow = true
+            else
+                btnThorns:Hide()
+            end
+        elseif i == 10 then
             -- Emerald Blessing row
             local btnEm = getglobal(row:GetName().."Emerald")
             local hasEmerald = self.RankInfo and self.RankInfo["Emerald"]
@@ -594,7 +728,6 @@ function Druid:UpdateBuffBar()
         elseif assigns and assigns[i] and assigns[i] > 0 then
             local val = assigns[i]
             local motwS = math.mod(val, 4)
-            local thornsS = math.mod(math.floor(val/4), 4)
             
             local function UpdateHUD(btn, state, typeIdx, buffKey, label)
                 if not btn then return false end
@@ -615,8 +748,8 @@ function Druid:UpdateBuffBar()
                         local icon = getglobal(btn:GetName().."Icon")
                         txt:SetText((total-missing).."/"..total)
                         txt:SetTextColor(1,0,0)
-                        if state == 1 then
-                            icon:SetTexture(self.BuffIconsGroup[typeIdx] or self.BuffIcons[typeIdx])
+                        if state == 1 and self.BuffIconsGroup[typeIdx] then
+                            icon:SetTexture(self.BuffIconsGroup[typeIdx])
                         else
                             icon:SetTexture(self.BuffIcons[typeIdx])
                         end
@@ -631,8 +764,7 @@ function Druid:UpdateBuffBar()
             end
             
             local f1 = UpdateHUD(getglobal(row:GetName().."MotW"), motwS, 0, "hasMotW", "Mark of the Wild")
-            local f2 = UpdateHUD(getglobal(row:GetName().."Thorns"), thornsS, 1, "hasThorns", "Thorns")
-            showRow = f1 or f2
+            showRow = f1
         end
         
         if showRow then
@@ -666,7 +798,7 @@ function Druid:CreateConfigWindow()
     end
     
     local f = CreateFrame("Frame", "ClassPowerDruidConfig", UIParent)
-    f:SetWidth(780)
+    f:SetWidth(820)
     f:SetHeight(450)
     f:SetPoint("CENTER", 0, 0)
     f:SetBackdrop({
@@ -736,9 +868,13 @@ function Druid:CreateConfigWindow()
     
     for g = 1, 8 do
         local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 180 + (g-1)*58, headerY)
+        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 165 + (g-1)*52, headerY)
         lbl:SetText("G"..g)
     end
+    
+    local lblThorns = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lblThorns:SetPoint("TOPLEFT", f, "TOPLEFT", 590, headerY)
+    lblThorns:SetText("Thorns")
     
     local lblInnerv = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lblInnerv:SetPoint("TOPLEFT", f, "TOPLEFT", 660, headerY)
@@ -761,7 +897,7 @@ end
 function Druid:CreateConfigRow(parent, rowIndex)
     local rowName = "CPDruidRow"..rowIndex
     local row = CreateFrame("Frame", rowName, parent)
-    row:SetWidth(750)
+    row:SetWidth(790)
     row:SetHeight(44)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*46)
     
@@ -777,7 +913,7 @@ function Druid:CreateConfigRow(parent, rowIndex)
     nameStr:SetText("")
     
     local caps = CreateFrame("Frame", rowName.."Caps", row)
-    caps:SetWidth(80)
+    caps:SetWidth(65)
     caps:SetHeight(22)
     caps:SetPoint("TOPLEFT", row, "TOPLEFT", 80, -12)
     
@@ -793,14 +929,14 @@ function Druid:CreateConfigRow(parent, rowIndex)
     
     CreateCapIcon("MotW", 0)
     CreateCapIcon("Thorns", 16)
-    CreateCapIcon("Emerald", 36)
-    CreateCapIcon("Innervate", 52)
+    CreateCapIcon("Emerald", 32)
+    CreateCapIcon("Innervate", 48)
     
     for g = 1, 8 do
         local grpFrame = CreateFrame("Frame", rowName.."Group"..g, row)
-        grpFrame:SetWidth(54)
+        grpFrame:SetWidth(48)
         grpFrame:SetHeight(42)
-        grpFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 165 + (g-1)*58, 0)
+        grpFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 150 + (g-1)*52, 0)
         grpFrame:SetBackdrop({
             bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -809,45 +945,50 @@ function Druid:CreateConfigRow(parent, rowIndex)
         })
         grpFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
         
-        -- MotW button
+        -- MotW button only (Thorns handled via list now)
         local btnMotW = CreateFrame("Button", rowName.."Group"..g.."MotW", grpFrame)
-        btnMotW:SetWidth(24); btnMotW:SetHeight(24)
-        btnMotW:SetPoint("LEFT", grpFrame, "LEFT", 2, 0)
+        btnMotW:SetWidth(28); btnMotW:SetHeight(28)
+        btnMotW:SetPoint("CENTER", grpFrame, "CENTER", 0, 0)
         local motwBg = btnMotW:CreateTexture(btnMotW:GetName().."Background", "BACKGROUND")
         motwBg:SetAllPoints(btnMotW); motwBg:SetTexture(0.1, 0.1, 0.1, 0.5)
         local motwIcon = btnMotW:CreateTexture(btnMotW:GetName().."Icon", "OVERLAY")
-        motwIcon:SetWidth(22); motwIcon:SetHeight(22); motwIcon:SetPoint("CENTER", btnMotW, "CENTER", 0, 0)
+        motwIcon:SetWidth(26); motwIcon:SetHeight(26); motwIcon:SetPoint("CENTER", btnMotW, "CENTER", 0, 0)
         local motwTxt = btnMotW:CreateFontString(btnMotW:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
         motwTxt:SetPoint("BOTTOM", btnMotW, "BOTTOM", 0, -10); motwTxt:SetJustifyH("CENTER")
         btnMotW:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btnMotW:SetScript("OnClick", function() Druid:SubButton_OnClick(this) end)
         btnMotW:SetScript("OnEnter", function() Druid:SubButton_OnEnter(this) end)
         btnMotW:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        
-        -- Thorns button
-        local btnThorns = CreateFrame("Button", rowName.."Group"..g.."Thorns", grpFrame)
-        btnThorns:SetWidth(24); btnThorns:SetHeight(24)
-        btnThorns:SetPoint("LEFT", btnMotW, "RIGHT", 1, 0)
-        local thornsBg = btnThorns:CreateTexture(btnThorns:GetName().."Background", "BACKGROUND")
-        thornsBg:SetAllPoints(btnThorns); thornsBg:SetTexture(0.1, 0.1, 0.1, 0.5)
-        local thornsIcon = btnThorns:CreateTexture(btnThorns:GetName().."Icon", "OVERLAY")
-        thornsIcon:SetWidth(22); thornsIcon:SetHeight(22); thornsIcon:SetPoint("CENTER", btnThorns, "CENTER", 0, 0)
-        local thornsTxt = btnThorns:CreateFontString(btnThorns:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
-        thornsTxt:SetPoint("BOTTOM", btnThorns, "BOTTOM", 0, -10); thornsTxt:SetJustifyH("CENTER")
-        btnThorns:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        btnThorns:SetScript("OnClick", function() Druid:SubButton_OnClick(this) end)
-        btnThorns:SetScript("OnEnter", function() Druid:SubButton_OnEnter(this) end)
-        btnThorns:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
+    
+    -- Thorns List button
+    local thornsBtn = CreateFrame("Button", rowName.."ThornsList", row)
+    thornsBtn:SetWidth(28); thornsBtn:SetHeight(28)
+    thornsBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 575, -6)
+    local thornsBg = thornsBtn:CreateTexture(thornsBtn:GetName().."Background", "BACKGROUND")
+    thornsBg:SetAllPoints(thornsBtn); thornsBg:SetTexture(0.1, 0.1, 0.1, 0.5)
+    local thornsIcon = thornsBtn:CreateTexture(thornsBtn:GetName().."Icon", "OVERLAY")
+    thornsIcon:SetWidth(26); thornsIcon:SetHeight(26); thornsIcon:SetPoint("CENTER", thornsBtn, "CENTER", 0, 0)
+    local thornsTxt = thornsBtn:CreateFontString(thornsBtn:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
+    thornsTxt:SetPoint("CENTER", thornsBtn, "CENTER", 0, 0)
+    thornsBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    thornsBtn:SetScript("OnClick", function() Druid:ThornsButton_OnClick(this) end)
+    thornsBtn:SetScript("OnEnter", function() Druid:ThornsButton_OnEnter(this) end)
+    thornsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    
+    local thornsCount = row:CreateFontString(rowName.."ThornsCount", "OVERLAY", "GameFontHighlightSmall")
+    thornsCount:SetPoint("TOP", thornsBtn, "BOTTOM", 0, -2)
+    thornsCount:SetWidth(50)
+    thornsCount:SetText("")
     
     -- Innervate target button
     local innervBtn = CreateFrame("Button", rowName.."Innervate", row)
-    innervBtn:SetWidth(24); innervBtn:SetHeight(24)
-    innervBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 645, -8)
+    innervBtn:SetWidth(28); innervBtn:SetHeight(28)
+    innervBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 645, -6)
     local innervBg = innervBtn:CreateTexture(innervBtn:GetName().."Background", "BACKGROUND")
     innervBg:SetAllPoints(innervBtn); innervBg:SetTexture(0.1, 0.1, 0.1, 0.5)
     local innervIcon = innervBtn:CreateTexture(innervBtn:GetName().."Icon", "OVERLAY")
-    innervIcon:SetWidth(22); innervIcon:SetHeight(22); innervIcon:SetPoint("CENTER", innervBtn, "CENTER", 0, 0)
+    innervIcon:SetWidth(26); innervIcon:SetHeight(26); innervIcon:SetPoint("CENTER", innervBtn, "CENTER", 0, 0)
     local innervTxt = innervBtn:CreateFontString(innervBtn:GetName().."Text", "OVERLAY", "GameFontNormalSmall")
     innervTxt:SetPoint("CENTER", innervBtn, "CENTER", 0, 0)
     innervBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -883,7 +1024,7 @@ function Druid:UpdateConfigGrid()
             if nameStr then 
                 local displayName = druidName
                 if string.len(druidName) > 10 then
-                    displayName = string.sub(druidName, 1, 9)..".."
+                    displayName = string.sub(druidName, 1, 9).."."
                 end
                 nameStr:SetText(displayName) 
             end
@@ -899,6 +1040,7 @@ function Druid:UpdateConfigGrid()
             
             self:UpdateCapabilityIcons(rowIndex, druidName, info)
             self:UpdateGroupButtons(rowIndex, druidName)
+            self:UpdateThornsButton(rowIndex, druidName)
             self:UpdateInnervateButton(rowIndex, druidName)
         end
         rowIndex = rowIndex + 1
@@ -950,7 +1092,6 @@ function Druid:UpdateGroupButtons(rowIndex, druidName)
     for g = 1, 8 do
         local val = assigns[g] or 0
         local motwState = math.mod(val, 4)
-        local thornsState = math.mod(math.floor(val/4), 4)
         
         local prefix = "CPDruidRow"..rowIndex.."Group"..g
         
@@ -996,7 +1137,42 @@ function Druid:UpdateGroupButtons(rowIndex, druidName)
         end
         
         UpdateBtn("MotW", motwState, 0, "hasMotW")
-        UpdateBtn("Thorns", thornsState, 1, "hasThorns")
+    end
+end
+
+function Druid:UpdateThornsButton(rowIndex, druidName)
+    local btn = getglobal("CPDruidRow"..rowIndex.."ThornsList")
+    local countLabel = getglobal("CPDruidRow"..rowIndex.."ThornsCount")
+    if not btn then return end
+    
+    local icon = getglobal(btn:GetName().."Icon")
+    icon:SetTexture(self.SpecialIcons["Thorns"])
+    
+    local listCount = self:GetThornsListCount(druidName)
+    local missing, total = self:GetThornsMissing(druidName)
+    
+    if listCount > 0 then
+        icon:Show()
+        btn:SetAlpha(1.0)
+        if countLabel then 
+            countLabel:SetText((total-missing).."/"..total) 
+            if missing > 0 then
+                countLabel:SetTextColor(1, 0, 0)
+            else
+                countLabel:SetTextColor(0, 1, 0)
+            end
+        end
+        local text = getglobal(btn:GetName().."Text")
+        if missing > 0 then
+            text:SetText("|cffff0000!|r")
+        else
+            text:SetText("")
+        end
+    else
+        icon:Show()
+        btn:SetAlpha(0.3)
+        if countLabel then countLabel:SetText("") end
+        getglobal(btn:GetName().."Text"):SetText("")
     end
 end
 
@@ -1036,23 +1212,57 @@ function Druid:BuffButton_OnClick(btn)
     local pname = UnitName("player")
     
     if i == 9 then
-        -- Emerald Blessing - just cast it
+        -- Thorns - cast on first person in list missing it
+        local thornsList = self.ThornsList[pname]
+        if thornsList then
+            for _, target in ipairs(thornsList) do
+                local status = self.CurrentBuffsByName[target]
+                if status and not status.hasThorns and not status.dead and status.visible then
+                    ClearTarget()
+                    TargetByName(target, true)
+                    if UnitName("target") == target then
+                        if CheckInteractDistance("target", 4) then
+                            CastSpellByName(self.Spells.THORNS)
+                            TargetLastTarget()
+                            self:ScanRaid()
+                            self:UpdateBuffBar()
+                            return
+                        end
+                    end
+                    TargetLastTarget()
+                end
+            end
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Thorns targets in range!")
+        end
+    elseif i == 10 then
+        -- Emerald Blessing - just cast it (self-cast raid buff)
         CastSpellByName(self.Spells.EMERALD)
     else
+        -- Group buff (MotW/GotW)
         local gid = i
-        local spellName = nil
-        local buffKey = nil
+        local assigns = self.Assignments[pname]
+        local val = assigns and assigns[gid] or 0
+        local motwState = math.mod(val, 4)
+        
+        -- Determine spell based on assignment state and click type
+        -- State 1 = Group (Gift), State 2 = Single (Mark)
+        -- Left-click uses assigned type, Right-click uses opposite
         local isRightClick = (arg1 == "RightButton")
+        local spellName = nil
+        local buffKey = "hasMotW"
         
         if suffix == "MotW" then
-            buffKey = "hasMotW"
-            spellName = isRightClick and self.Spells.MOTW or self.Spells.GOTW
-        elseif suffix == "Thorns" then
-            buffKey = "hasThorns"
-            spellName = self.Spells.THORNS
+            if motwState == 1 then
+                -- Assigned as Group buff
+                spellName = isRightClick and self.Spells.MOTW or self.Spells.GOTW
+            else
+                -- Assigned as Single buff (or right-click override)
+                spellName = isRightClick and self.Spells.GOTW or self.Spells.MOTW
+            end
         end
         
         if spellName and self.CurrentBuffs[gid] then
+            -- Find first valid target missing the buff
             for _, member in self.CurrentBuffs[gid] do
                 if member.visible and not member.dead and not member[buffKey] then
                     ClearTarget()
@@ -1064,12 +1274,17 @@ function Druid:BuffButton_OnClick(btn)
                             self:ScanRaid()
                             self:UpdateBuffBar()
                             return
+                        else
+                            -- Out of range, restore target and try next
+                            TargetLastTarget()
                         end
+                    else
+                        -- Couldn't target, restore and try next
+                        TargetLastTarget()
                     end
                 end
             end
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No targets in range for Group "..gid)
-            TargetLastTarget()
         end
     end
 end
@@ -1090,6 +1305,8 @@ function Druid:ClearButton_OnClick(btn)
     
     self.Assignments[druidName] = {}
     self.LegacyAssignments[druidName] = {}
+    self.ThornsList[druidName] = {}
+    self:SaveThornsList()
     ClassPower_SendMessage("DCLEAR "..druidName)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared assignments for "..druidName)
     self:UpdateConfigGrid()
@@ -1117,24 +1334,11 @@ function Druid:SubButton_OnClick(btn)
     local cur = self.Assignments[druidName][grpIdx] or 0
     
     local motw = math.mod(cur, 4)
-    local thorns = math.mod(math.floor(cur/4), 4)
     
-    -- Shift-click cycles both buffs together
-    if IsShiftKeyDown() then
-        local maxState = motw
-        if thorns > maxState then maxState = thorns end
-        local newState = math.mod(maxState + 1, 3)
-        motw = newState
-        thorns = newState
-    else
-        if buffType == "MotW" then
-            motw = math.mod(motw + 1, 3)
-        elseif buffType == "Thorns" then
-            thorns = math.mod(thorns + 1, 3)
-        end
-    end
+    -- Click cycles: Off -> Gift (Group) -> Mark (Single) -> Off
+    motw = math.mod(motw + 1, 3)
     
-    cur = motw + (thorns * 4)
+    cur = motw
     self.Assignments[druidName][grpIdx] = cur
     ClassPower_SendMessage("DASSIGN "..druidName.." "..grpIdx.." "..cur)
     self:UpdateConfigGrid()
@@ -1142,19 +1346,64 @@ function Druid:SubButton_OnClick(btn)
 end
 
 function Druid:SubButton_OnEnter(btn)
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Mark of the Wild")
+    GameTooltip:AddLine("Click to cycle:", 1, 1, 1)
+    GameTooltip:AddLine("Off -> Gift (Group) -> Mark (Single)", 0.7, 0.7, 0.7)
+    GameTooltip:Show()
+end
+
+function Druid:ThornsButton_OnClick(btn)
     local btnName = btn:GetName()
-    local _, _, _, _, buffType = string.find(btnName, "CPDruidRow(%d+)Group(%d+)(.*)")
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)ThornsList")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
+    if not druidName then return end
+    
+    -- Only allow self to manage own thorns list
+    if druidName ~= UnitName("player") then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You can only manage your own Thorns list.")
+        return
+    end
+    
+    self.ContextName = druidName
+    self.AssignMode = "Thorns"
+    ToggleDropDownMenu(1, nil, ClassPowerDruidDropDown, btn, 0, 0)
+end
+
+function Druid:ThornsButton_OnEnter(btn)
+    local btnName = btn:GetName()
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)ThornsList")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
     
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    local label = buffType or "Unknown"
-    if buffType == "MotW" then label = "Mark of the Wild"
-    elseif buffType == "Thorns" then label = "Thorns"
+    GameTooltip:SetText("Thorns List")
+    
+    local thornsList = self.ThornsList[druidName]
+    if thornsList and table.getn(thornsList) > 0 then
+        GameTooltip:AddLine("Assigned targets:", 1, 1, 1)
+        for _, name in ipairs(thornsList) do
+            local status = self.CurrentBuffsByName[name]
+            if status then
+                    GameTooltip:AddLine("  "..name.." |cff00ff00(buffed)|r", 0.7, 0.7, 0.7)
+                else
+                    GameTooltip:AddLine("  "..name.." |cffff0000(missing)|r", 0.7, 0.7, 0.7)
+                end
+            else
+                GameTooltip:AddLine("  "..name.." |cffffff00(not in raid)|r", 0.7, 0.7, 0.7)
+            end
+        end
+    else
+        GameTooltip:AddLine("Click to add targets", 0.7, 0.7, 0.7)
     end
-    GameTooltip:SetText(label)
-    GameTooltip:AddLine("Click to cycle:", 1, 1, 1)
-    GameTooltip:AddLine("Off -> Group -> Single", 0.7, 0.7, 0.7)
     GameTooltip:AddLine(" ", 1, 1, 1)
-    GameTooltip:AddLine("Shift-Click: Cycle ALL buffs", 0, 1, 0)
+    GameTooltip:AddLine("Left-click: Add target", 0, 1, 0)
+    GameTooltip:AddLine("Right-click on name: Remove", 1, 0.5, 0)
     GameTooltip:Show()
 end
 
@@ -1231,19 +1480,52 @@ function Druid:ResetUI()
 end
 
 -----------------------------------------------------------------------------------
--- Innervate Dropdown
+-- Target Dropdown (Innervate & Thorns)
 -----------------------------------------------------------------------------------
 
-function Druid:InnervateDropDown_Initialize(level)
+function Druid:TargetDropDown_Initialize(level)
     if not level then level = 1 end
     local info = {}
+    local mode = self.AssignMode or "Innervate"
     
     if level == 1 then
+        -- Clear option
         info = {}
-        info.text = ">> Clear <<"
+        if mode == "Thorns" then
+            info.text = ">> Clear All <<"
+        else
+            info.text = ">> Clear <<"
+        end
         info.value = "CLEAR"
         info.func = function() Druid:AssignTarget_OnClick() end
         UIDropDownMenu_AddButton(info)
+        
+        -- For Thorns mode, show current list with remove option
+        if mode == "Thorns" then
+            local pname = self.ContextName or UnitName("player")
+            local thornsList = self.ThornsList[pname]
+            if thornsList and table.getn(thornsList) > 0 then
+                info = {}
+                info.text = "-- Current List --"
+                info.isTitle = 1
+                info.notCheckable = 1
+                UIDropDownMenu_AddButton(info)
+                
+                for _, name in ipairs(thornsList) do
+                    info = {}
+                    info.text = "|cffff6600- "..name.."|r"
+                    info.value = "REMOVE:"..name
+                    info.func = function() Druid:AssignTarget_OnClick() end
+                    UIDropDownMenu_AddButton(info)
+                end
+                
+                info = {}
+                info.text = "-- Add New --"
+                info.isTitle = 1
+                info.notCheckable = 1
+                UIDropDownMenu_AddButton(info)
+            end
+        end
         
         local numRaid = GetNumRaidMembers()
         if numRaid > 0 then
@@ -1305,16 +1587,32 @@ function Druid:AssignTarget_OnClick()
     local mode = self.AssignMode or "Innervate"
     
     if not pname then pname = UnitName("player") end
-    self.LegacyAssignments[pname] = self.LegacyAssignments[pname] or {}
     
-    if targetName == "CLEAR" then
-        self.LegacyAssignments[pname][mode] = nil
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared "..mode.." for "..pname)
-        ClassPower_SendMessage("DASSIGNTARGET "..pname.." nil")
+    if mode == "Thorns" then
+        -- Handle Thorns list
+        if targetName == "CLEAR" then
+            self:ClearThornsList(pname)
+        elseif string.find(targetName, "^REMOVE:") then
+            local _, _, removeName = string.find(targetName, "^REMOVE:(.*)")
+            if removeName then
+                self:RemoveFromThornsList(pname, removeName)
+            end
+        else
+            self:AddToThornsList(pname, targetName)
+        end
     else
-        self.LegacyAssignments[pname][mode] = targetName
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..pname.." "..mode.." = "..targetName)
-        ClassPower_SendMessage("DASSIGNTARGET "..pname.." "..targetName)
+        -- Handle Innervate (single target)
+        self.LegacyAssignments[pname] = self.LegacyAssignments[pname] or {}
+        
+        if targetName == "CLEAR" then
+            self.LegacyAssignments[pname]["Innervate"] = nil
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared Innervate for "..pname)
+            ClassPower_SendMessage("DASSIGNTARGET "..pname.." nil")
+        else
+            self.LegacyAssignments[pname]["Innervate"] = targetName
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..pname.." Innervate = "..targetName)
+            ClassPower_SendMessage("DASSIGNTARGET "..pname.." "..targetName)
+        end
     end
     
     self:UpdateUI()
