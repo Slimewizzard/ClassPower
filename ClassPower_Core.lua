@@ -341,4 +341,113 @@ if not getglobal("ClassPowerDropDown") then
     CreateFrame("Frame", "ClassPowerDropDown", UIParent, "UIDropDownMenuTemplate")
 end
 
+-----------------------------------------------------------------------------------
+-- Minimap Button
+-----------------------------------------------------------------------------------
+
+function ClassPower_CreateMinimapButton()
+    if getglobal("ClassPowerMinimapButton") then return end
+    
+    local btn = CreateFrame("Button", "ClassPowerMinimapButton", Minimap)
+    btn:SetWidth(31)
+    btn:SetHeight(31)
+    btn:SetFrameStrata("MEDIUM")
+    btn:SetFrameLevel(8)
+    btn:EnableMouse(true)
+    btn:SetMovable(true)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
+    
+    -- Icon
+    local icon = btn:CreateTexture(btn:GetName().."Icon", "BACKGROUND")
+    icon:SetTexture("Interface\\AddOns\\PriestPower\\Media\\cpwr")
+    icon:SetWidth(20)
+    icon:SetHeight(20)
+    icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    
+    -- Border
+    local border = btn:CreateTexture(btn:GetName().."Border", "OVERLAY")
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    border:SetWidth(56)
+    border:SetHeight(56)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+    
+    -- Highlight
+    local highlight = btn:CreateTexture(btn:GetName().."Highlight", "HIGHLIGHT")
+    highlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    highlight:SetBlendMode("ADD")
+    highlight:SetWidth(25)
+    highlight:SetHeight(25)
+    highlight:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    
+    -- Position around minimap (angle in degrees)
+    local function UpdatePosition(angle)
+        local radius = 80
+        local x = math.cos(math.rad(angle)) * radius
+        local y = math.sin(math.rad(angle)) * radius
+        btn:ClearAllPoints()
+        btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
+        CP_PerUser.MinimapAngle = angle
+    end
+    
+    -- Load saved position or default to top-right
+    local savedAngle = CP_PerUser and CP_PerUser.MinimapAngle or 45
+    UpdatePosition(savedAngle)
+    
+    -- Dragging
+    btn:SetScript("OnDragStart", function()
+        this.isDragging = true
+    end)
+    
+    btn:SetScript("OnDragStop", function()
+        this.isDragging = false
+    end)
+    
+    btn:SetScript("OnUpdate", function()
+        if not this.isDragging then return end
+        local mx, my = Minimap:GetCenter()
+        local cx, cy = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        cx, cy = cx / scale, cy / scale
+        local angle = math.deg(math.atan2(cy - my, cx - mx))
+        UpdatePosition(angle)
+    end)
+    
+    -- Click handlers
+    btn:SetScript("OnClick", function()
+        if arg1 == "LeftButton" then
+            ClassPower_SlashHandler("")
+        elseif arg1 == "RightButton" then
+            -- Right-click could show a menu or toggle HUD
+            if ClassPower.activeModule and ClassPower.activeModule.BuffBar then
+                if ClassPower.activeModule.BuffBar:IsVisible() then
+                    ClassPower.activeModule.BuffBar:Hide()
+                else
+                    ClassPower.activeModule.BuffBar:Show()
+                end
+            end
+        end
+    end)
+    
+    btn:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(this, "ANCHOR_LEFT")
+        GameTooltip:SetText("ClassPower")
+        GameTooltip:AddLine("Left-click: Open Config", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Right-click: Toggle HUD", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Drag: Move button", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    
+    btn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+end
+
+-- Create minimap button after a short delay (ensure Minimap exists)
+local minimapInitFrame = CreateFrame("Frame")
+minimapInitFrame:RegisterEvent("PLAYER_LOGIN")
+minimapInitFrame:SetScript("OnEvent", function()
+    ClassPower_CreateMinimapButton()
+end)
+
 CP_Debug("ClassPower Core loaded.")

@@ -1903,7 +1903,24 @@ function PriestPowerBuffBar_Create()
     end)
     f:SetScript("OnMouseUp", function() 
         this:StopMovingOrSizing()
-        PriestPowerBuffBar_SavePosition()
+        if arg1 == "RightButton" then
+            -- Right-click opens config
+            if PriestPowerConfigBase then
+                if PriestPowerConfigBase:IsVisible() then
+                    PriestPowerConfigBase:Hide()
+                else
+                    PriestPowerConfig_Create()
+                    PriestPowerConfigBase:Show()
+                    PriestPower_UpdateUI()
+                end
+            else
+                PriestPowerConfig_Create()
+                PriestPowerConfigBase:Show()
+                PriestPower_UpdateUI()
+            end
+        else
+            PriestPowerBuffBar_SavePosition()
+        end
     end)
     f:SetScript("OnHide", function() this:StopMovingOrSizing() end)
     
