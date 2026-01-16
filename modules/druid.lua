@@ -1519,3 +1519,287 @@ function Druid:SubButton_OnClick(btn)
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
 end
+
+function Druid:SubButton_OnEnter(btn)
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Mark of the Wild")
+    GameTooltip:AddLine("Click to toggle assignment", 1, 1, 1)
+    GameTooltip:AddLine(" ", 1, 1, 1)
+    GameTooltip:AddLine("On HUD:", 1, 0.8, 0)
+    GameTooltip:AddLine("Left-click: Gift of the Wild (group)", 0.7, 0.7, 0.7)
+    GameTooltip:AddLine("Right-click: Mark of the Wild (single)", 0.7, 0.7, 0.7)
+    GameTooltip:Show()
+end
+
+function Druid:ThornsButton_OnClick(btn)
+    local btnName = btn:GetName()
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)ThornsList")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
+    if not druidName then return end
+    
+    -- Only allow self to manage own thorns list
+    if druidName ~= UnitName("player") then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You can only manage your own Thorns list.")
+        return
+    end
+    
+    self.ContextName = druidName
+    self.AssignMode = "Thorns"
+    ToggleDropDownMenu(1, nil, ClassPowerDruidDropDown, btn, 0, 0)
+end
+
+function Druid:ThornsButton_OnEnter(btn)
+    local btnName = btn:GetName()
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)ThornsList")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
+    
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Thorns List")
+    
+    local thornsList = self.ThornsList[druidName]
+    if thornsList and table.getn(thornsList) > 0 then
+        GameTooltip:AddLine("Assigned targets:", 1, 1, 1)
+        for _, name in ipairs(thornsList) do
+            local status = self.CurrentBuffsByName[name]
+            if status then
+                if status.hasThorns then
+                    GameTooltip:AddLine("  "..name.." |cff00ff00(buffed)|r", 0.7, 0.7, 0.7)
+                else
+                    GameTooltip:AddLine("  "..name.." |cffff0000(missing)|r", 0.7, 0.7, 0.7)
+                end
+            else
+                GameTooltip:AddLine("  "..name.." |cffffff00(not in raid)|r", 0.7, 0.7, 0.7)
+            end
+        end
+    else
+        GameTooltip:AddLine("Click to add targets", 0.7, 0.7, 0.7)
+    end
+    GameTooltip:AddLine(" ", 1, 1, 1)
+    GameTooltip:AddLine("Left-click: Add target", 0, 1, 0)
+    GameTooltip:AddLine("Right-click on name: Remove", 1, 0.5, 0)
+    GameTooltip:Show()
+end
+
+function Druid:InnervateButton_OnClick(btn)
+    local btnName = btn:GetName()
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)Innervate")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
+    if not druidName then return end
+    
+    if not ClassPower_IsPromoted() and druidName ~= UnitName("player") then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You must be promoted to assign others.")
+        return
+    end
+    
+    self.ContextName = druidName
+    self.AssignMode = "Innervate"
+    ToggleDropDownMenu(1, nil, ClassPowerDruidDropDown, btn, 0, 0)
+end
+
+function Druid:InnervateButton_OnEnter(btn)
+    local btnName = btn:GetName()
+    local _, _, rowIdx = string.find(btnName, "CPDruidRow(%d+)Innervate")
+    if not rowIdx then return end
+    
+    local nameStr = getglobal("CPDruidRow"..rowIdx.."Name")
+    local druidName = nameStr and nameStr:GetText()
+    local target = self.LegacyAssignments[druidName] and self.LegacyAssignments[druidName]["Innervate"]
+    
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Innervate Assignment")
+    if target then
+        GameTooltip:AddLine("Target: "..target, 0, 1, 0)
+    else
+        GameTooltip:AddLine("Click to assign", 0.7, 0.7, 0.7)
+    end
+    GameTooltip:Show()
+end
+
+-----------------------------------------------------------------------------------
+-- Update UI
+-----------------------------------------------------------------------------------
+
+function Druid:UpdateUI()
+    self:UpdateBuffBar()
+    if self.ConfigWindow and self.ConfigWindow:IsVisible() then
+        self:UpdateConfigGrid()
+    end
+end
+
+function Druid:ResetUI()
+    CP_PerUser.DruidPoint = nil
+    CP_PerUser.DruidRelativePoint = nil
+    CP_PerUser.DruidX = nil
+    CP_PerUser.DruidY = nil
+    CP_PerUser.DruidScale = 0.7
+    CP_PerUser.DruidConfigScale = 1.0
+    
+    if self.BuffBar then
+        self.BuffBar:ClearAllPoints()
+        self.BuffBar:SetPoint("CENTER", 0, 0)
+        self.BuffBar:SetScale(0.7)
+    end
+    
+    if self.ConfigWindow then
+        self.ConfigWindow:ClearAllPoints()
+        self.ConfigWindow:SetPoint("CENTER", 0, 0)
+        self.ConfigWindow:SetScale(1.0)
+    end
+    
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: UI reset to defaults.")
+end
+
+-----------------------------------------------------------------------------------
+-- Target Dropdown (Innervate & Thorns)
+-----------------------------------------------------------------------------------
+
+function Druid:TargetDropDown_Initialize(level)
+    if not level then level = 1 end
+    local info = {}
+    local mode = self.AssignMode or "Innervate"
+    
+    if level == 1 then
+        -- Clear option
+        info = {}
+        if mode == "Thorns" then
+            info.text = ">> Clear All <<"
+        else
+            info.text = ">> Clear <<"
+        end
+        info.value = "CLEAR"
+        info.func = function() Druid:AssignTarget_OnClick() end
+        UIDropDownMenu_AddButton(info)
+        
+        -- For Thorns mode, show current list with remove option
+        if mode == "Thorns" then
+            local pname = self.ContextName or UnitName("player")
+            local thornsList = self.ThornsList[pname]
+            if thornsList and table.getn(thornsList) > 0 then
+                info = {}
+                info.text = "-- Current List --"
+                info.isTitle = 1
+                info.notCheckable = 1
+                UIDropDownMenu_AddButton(info)
+                
+                for _, name in ipairs(thornsList) do
+                    info = {}
+                    info.text = "|cffff6600- "..name.."|r"
+                    info.value = "REMOVE:"..name
+                    info.func = function() Druid:AssignTarget_OnClick() end
+                    UIDropDownMenu_AddButton(info)
+                end
+                
+                info = {}
+                info.text = "-- Add New --"
+                info.isTitle = 1
+                info.notCheckable = 1
+                UIDropDownMenu_AddButton(info)
+            end
+        end
+        
+        local numRaid = GetNumRaidMembers()
+        if numRaid > 0 then
+            local groups = {}
+            for g = 1, 8 do groups[g] = {} end
+            for i = 1, numRaid do
+                local name, _, subgroup = GetRaidRosterInfo(i)
+                if name and subgroup >= 1 and subgroup <= 8 then
+                    table.insert(groups[subgroup], name)
+                end
+            end
+            for g = 1, 8 do
+                if table.getn(groups[g]) > 0 then
+                    info = {}
+                    info.text = "Group "..g
+                    info.hasArrow = 1
+                    info.value = g
+                    UIDropDownMenu_AddButton(info)
+                end
+            end
+        else
+            local numParty = GetNumPartyMembers()
+            info = {}
+            info.text = UnitName("player")
+            info.value = UnitName("player")
+            info.func = function() Druid:AssignTarget_OnClick() end
+            UIDropDownMenu_AddButton(info)
+            for i = 1, numParty do
+                local name = UnitName("party"..i)
+                if name then
+                    info = {}
+                    info.text = name
+                    info.value = name
+                    info.func = function() Druid:AssignTarget_OnClick() end
+                    UIDropDownMenu_AddButton(info)
+                end
+            end
+        end
+    elseif level == 2 then
+        local groupID = UIDROPDOWNMENU_MENU_VALUE
+        if type(groupID) == "number" then
+            for i = 1, GetNumRaidMembers() do
+                local name, _, subgroup = GetRaidRosterInfo(i)
+                if name and subgroup == groupID then
+                    info = {}
+                    info.text = name
+                    info.value = name
+                    info.func = function() Druid:AssignTarget_OnClick() end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+        end
+    end
+end
+
+function Druid:AssignTarget_OnClick()
+    local targetName = this.value
+    local pname = self.ContextName
+    local mode = self.AssignMode or "Innervate"
+    
+    if not pname then pname = UnitName("player") end
+    
+    if mode == "Thorns" then
+        -- Handle Thorns list
+        if targetName == "CLEAR" then
+            self:ClearThornsList(pname)
+        elseif string.find(targetName, "^REMOVE:") then
+            local _, _, removeName = string.find(targetName, "^REMOVE:(.*)")
+            if removeName then
+                self:RemoveFromThornsList(pname, removeName)
+            end
+        else
+            self:AddToThornsList(pname, targetName)
+        end
+    else
+        -- Handle Innervate (single target)
+        self.LegacyAssignments[pname] = self.LegacyAssignments[pname] or {}
+        
+        if targetName == "CLEAR" then
+            self.LegacyAssignments[pname]["Innervate"] = nil
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared Innervate for "..pname)
+            ClassPower_SendMessage("DASSIGNTARGET "..pname.." nil")
+        else
+            self.LegacyAssignments[pname]["Innervate"] = targetName
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..pname.." Innervate = "..targetName)
+            ClassPower_SendMessage("DASSIGNTARGET "..pname.." "..targetName)
+        end
+    end
+    
+    self:UpdateUI()
+    CloseDropDownMenus()
+end
+
+-----------------------------------------------------------------------------------
+-- Register Module
+-----------------------------------------------------------------------------------
+
+ClassPower:RegisterModule("DRUID", Druid)
