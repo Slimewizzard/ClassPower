@@ -3,7 +3,7 @@
 ## Notes: Class buff management for Turtle WoW (1.12.1) - Priest, Druid, Mage, Shaman, Paladin
 ## Author: Slimewizzard
 ## Version: 2.0
-## SavedVariablesPerCharacter: CP_PerUser, PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser
+## SavedVariablesPerCharacter: CP_PerUser, PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser, CP_PaladinAssignments, CP_DruidAssignments
 
 ClassPower_Core.lua
 modules\priest.lua

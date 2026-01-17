@@ -18,19 +18,16 @@ ClassPower is a buff management addon for World of Warcraft 1.12.1 (Turtle WoW).
 - **Innervate** (with mana threshold alerts)
 
 ### Paladin Module
-- **Blessings**: Wisdom, Might, Salvation, Light, Kings, Sanctuary
-- **Greater Blessings**: All class-wide blessings supported
-- **Auras**: Devotion, Retribution, Concentration, etc.
-- **Judgements**: Assignment tracking
-
-### Stub Modules (Coming Soon)
-- **Mage**: Arcane Intellect, Arcane Brilliance
-- **Shaman**: Totems
+- **Greater Blessings** assigned by **Class** (not group):
+  - Wisdom, Might, Kings, Salvation, Sanctuary, Light
+- **Aura Assignments**: Devotion, Retribution, Concentration, Resistance Auras, Sanctity
+- **Judgement Assignments**: Light, Wisdom, Crusader, Justice
+- **Symbol of Kings tracking**
+- **Smart Buffs**: Won't suggest Wisdom for Warriors/Rogues, Might for casters
 
 ## Features
 
-- **Smart Buff Management**: Easily assign and track buffs across raid groups.
-- **Persistent Assignments**: Your assignments save across `/reload` and game restarts.
+- **Smart Buff Management**: Easily assign and track buffs across raid groups or classes.
 - **Performance Optimized**:
   - Spell scanning only on `SPELLS_CHANGED` event
   - Buff scanning every 5 seconds (only when UI is visible)
@@ -38,7 +35,7 @@ ClassPower is a buff management addon for World of Warcraft 1.12.1 (Turtle WoW).
 - **Modern HUD (BuffBar)**:
   - **Dynamic Scaling**: Drag the bottom-right corner to resize.
   - **Smart Visibility**: Only shows buttons for missing buffs.
-  - **Quick Casting**: Left-click for group buff, Right-click for single target.
+  - **Quick Casting**: Left-click for group/greater buff, Right-click for single target.
 - **Raid Coordination**: Syncs assignments with other ClassPower users.
 - **Greater Buff Detection**: Properly detects both normal and greater versions of buffs.
 
@@ -46,13 +43,13 @@ ClassPower is a buff management addon for World of Warcraft 1.12.1 (Turtle WoW).
 
 | Action | Result |
 |--------|--------|
-| Left-click buff icon | Cast Prayer/Gift/Greater Blessing (group buff) |
+| Left-click buff icon | Cast Prayer/Gift/Greater Blessing |
 | Right-click buff icon | Cast single-target buff |
 | Shift-click assignment | Toggle all buffs at once (Priest) |
 | Left-click + drag BuffBar | Move the HUD |
 | Drag corner grip | Resize/scale the HUD |
 
-Icons disappear once everyone in your assigned group has the buff.
+Icons disappear once everyone in your assigned group/class has the buff.
 
 ## Commands
 
@@ -70,6 +67,10 @@ Icons disappear once everyone in your assigned group has the buff.
 - `/cp thorns`: Cast Thorns on the next person in your list missing it.
 - `/cp emerald`: Cast Emerald Blessing.
 
+### Paladin-specific
+- `/cp report`: Report all paladin assignments to raid/party chat.
+- `/cp checkbuffs`: Debug command to list buffs on current target.
+
 ### Legacy aliases
 - `/prip`, `/prp`, `/priestpower`: Work as before for Priest module.
 
@@ -85,7 +86,15 @@ Icons disappear once everyone in your assigned group has the buff.
 
 ### Druid-specific Features
 - **Thorns List**: Click the Thorns button to add/remove specific players.
-- **Innervate Threshold**: Use the slider to set a mana % threshold - the Innervate button will appear on your HUD when your target drops below this level.
+- **Innervate Threshold**: Use the slider to set a mana % threshold.
+
+### Paladin-specific Features
+- **Class-based Blessings**: Assign Greater Blessings per class (Warrior, Rogue, Priest, etc.)
+- **Aura Coordination**: Assign which aura each paladin should use.
+- **Judgement Coordination**: Assign which judgement each paladin is responsible for.
+- **Smart Buffs**: Automatically skips inappropriate blessings (e.g., Wisdom for Warriors).
+- **Symbol Tracking**: Shows how many Symbols of Kings each paladin has.
+- **Mouse Wheel**: Scroll on class icons to quickly cycle through blessings.
 
 ### Paladin-specific Features
 - **Per-Class Blessings**: Assign different blessings to each class.
@@ -107,7 +116,7 @@ ClassPower is designed to be lightweight:
 
 ## Credits
 
-- Inspired by **PallyPower** by Relar.
+- Inspired by **PallyPower** by Relar/Sneakyfoot.
 - Originally developed as PriestPower, expanded to support multiple classes.
 
 ## Support

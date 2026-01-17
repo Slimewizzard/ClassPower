@@ -75,6 +75,9 @@ function Druid:OnLoad()
         self.InnervateThreshold = CP_PerUser.DruidInnervateThreshold
     end
     
+    -- Load saved group assignments and Innervate target
+    self:LoadAssignments()
+    
     -- Initial spell scan
     self:ScanSpells()
     self:ScanRaid()
@@ -655,7 +658,19 @@ function Druid:CreateBuffBar()
     end)
     f:SetScript("OnMouseUp", function()
         this:StopMovingOrSizing()
-        Druid:SaveBuffBarPosition()
+        if arg1 == "RightButton" then
+            -- Right-click opens config
+            if Druid.ConfigWindow then
+                if Druid.ConfigWindow:IsVisible() then
+                    Druid.ConfigWindow:Hide()
+                else
+                    Druid.ConfigWindow:Show()
+                    Druid:UpdateConfigGrid()
+                end
+            end
+        else
+            Druid:SaveBuffBarPosition()
+        end
     end)
     
     local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
@@ -1431,18 +1446,42 @@ function Druid:BuffButton_OnClick(btn)
         
         if val == 0 then return end  -- Not assigned to this group
         
-        -- Left-click = Gift of the Wild (group), Right-click = Mark of the Wild (single)
+        -- Left-click = Gift of the Wild (if learned), Right-click = Mark of the Wild (single)
         local isRightClick = (arg1 == "RightButton")
-        local spellName = isRightClick and self.Spells.MOTW or self.Spells.GOTW
+        local hasGift = self.RankInfo and self.RankInfo[0] and self.RankInfo[0].talent == 1
+        local spellName
+        
+        if isRightClick then
+            spellName = self.Spells.MOTW  -- Always use single target on right-click
+        elseif hasGift then
+            spellName = self.Spells.GOTW  -- Use Gift if learned
+        else
+            spellName = self.Spells.MOTW  -- Fall back to Mark if Gift not learned
+        end
+        
+        CP_Debug("Druid BuffButton: hasGift="..tostring(hasGift)..", spell="..tostring(spellName)..", group="..gid)
         
         if self.CurrentBuffs[gid] then
-            -- Find first valid target missing the buff
+            CP_Debug("Group "..gid.." has data, checking members...")
+            
+            -- For Gift (left-click): target anyone visible and alive in range
+            -- For Mark (right-click): target someone missing the buff
             for _, member in self.CurrentBuffs[gid] do
-                if member.visible and not member.dead and not member.hasMotW then
+                CP_Debug("  Checking: "..member.name..", hasMotW="..tostring(member.hasMotW)..", visible="..tostring(member.visible)..", dead="..tostring(member.dead))
+                
+                -- For Mark (right-click), skip if they already have the buff
+                -- For Gift (left-click), we can target anyone
+                local isValidTarget = member.visible and not member.dead
+                if isRightClick and member.hasMotW then
+                    isValidTarget = false  -- Right-click only targets missing buff
+                end
+                
+                if isValidTarget then
                     ClearTarget()
                     TargetByName(member.name, true)
                     if UnitExists("target") and UnitName("target") == member.name then
                         if CheckInteractDistance("target", 4) then
+                            CP_Debug("Casting "..spellName.." on "..member.name)
                             CastSpellByName(spellName)
                             TargetLastTarget()
                             self:ScanRaid()
@@ -1450,15 +1489,19 @@ function Druid:BuffButton_OnClick(btn)
                             return
                         else
                             -- Out of range, restore target and try next
+                            CP_Debug(member.name.." out of range")
                             TargetLastTarget()
                         end
                     else
                         -- Couldn't target, restore and try next
+                        CP_Debug("Could not target "..member.name)
                         TargetLastTarget()
                     end
                 end
             end
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No targets in range for Group "..gid)
+        else
+            CP_Debug("No buff data for group "..gid)
         end
     end
 end
@@ -1796,6 +1839,68 @@ function Druid:AssignTarget_OnClick()
     
     self:UpdateUI()
     CloseDropDownMenus()
+    
+    -- Save if this is for the current player
+    if pname == UnitName("player") then
+        self:SaveAssignments()
+    end
+end
+
+-----------------------------------------------------------------------------------
+-- Persistence (Save/Load Assignments)
+-----------------------------------------------------------------------------------
+
+function Druid:SaveAssignments()
+    local pname = UnitName("player")
+    if not pname then return end
+    
+    -- Initialize saved variable if needed
+    if not CP_DruidAssignments then
+        CP_DruidAssignments = {}
+    end
+    
+    -- Save current player's group assignments (1-8)
+    CP_DruidAssignments.Assignments = self.Assignments[pname] or {}
+    
+    -- Save Innervate target
+    local legacyData = self.LegacyAssignments[pname]
+    if legacyData and legacyData["Innervate"] then
+        CP_DruidAssignments.InnervateTarget = legacyData["Innervate"]
+    else
+        CP_DruidAssignments.InnervateTarget = nil
+    end
+    
+    CP_Debug("Druid: Saved assignments for "..pname)
+end
+
+function Druid:LoadAssignments()
+    local pname = UnitName("player")
+    if not pname then return end
+    
+    -- Check if we have saved data
+    if not CP_DruidAssignments then
+        CP_Debug("Druid: No saved assignments found")
+        return
+    end
+    
+    -- Load group assignments (1-8)
+    if CP_DruidAssignments.Assignments then
+        self.Assignments[pname] = {}
+        for grp = 1, 8 do
+            local val = CP_DruidAssignments.Assignments[grp]
+            if val ~= nil then
+                self.Assignments[pname][grp] = val
+            end
+        end
+        CP_Debug("Druid: Loaded group assignments")
+    end
+    
+    -- Load Innervate target
+    if CP_DruidAssignments.InnervateTarget then
+        self.LegacyAssignments[pname] = self.LegacyAssignments[pname] or {}
+        self.LegacyAssignments[pname]["Innervate"] = CP_DruidAssignments.InnervateTarget
+        CP_Debug("Druid: Loaded Innervate target: "..CP_DruidAssignments.InnervateTarget)
+    end
 end
 
 -----------------------------------------------------------------------------------

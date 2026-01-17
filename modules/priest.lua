@@ -82,7 +82,10 @@ Priest.AssignMode = "Champ"
 function Priest:OnLoad()
     CP_Debug("Priest:OnLoad()")
     
-    -- Migrate old saved variables if they exist
+    -- Load saved assignments first
+    self:LoadAssignments()
+    
+    -- Migrate old saved variables if they exist (fallback compatibility)
     self:MigrateSavedVars()
     
     -- Initial spell scan
@@ -478,7 +481,11 @@ function Priest:OnAddonMessage(sender, msg)
         for gid = 1, 8 do
             local val = string.sub(assigns, gid, gid)
             if val ~= "n" and val ~= "" then
-                self.Assignments[sender][gid] = tonumber(val)
+                -- Only update if we don't have an existing non-zero value (preserves raid leader's assignments)
+                local existing = self.Assignments[sender][gid]
+                if not existing or existing == 0 then
+                    self.Assignments[sender][gid] = tonumber(val)
+                end
             end
         end
         
@@ -559,7 +566,19 @@ function Priest:CreateBuffBar()
     end)
     f:SetScript("OnMouseUp", function()
         this:StopMovingOrSizing()
-        Priest:SaveBuffBarPosition()
+        if arg1 == "RightButton" then
+            -- Right-click opens config
+            if Priest.ConfigWindow then
+                if Priest.ConfigWindow:IsVisible() then
+                    Priest.ConfigWindow:Hide()
+                else
+                    Priest.ConfigWindow:Show()
+                    Priest:UpdateConfigGrid()
+                end
+            end
+        else
+            Priest:SaveBuffBarPosition()
+        end
     end)
     
     local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
@@ -1354,6 +1373,7 @@ function Priest:ClearButton_OnClick(btn)
     self.Assignments[priestName] = {}
     self.LegacyAssignments[priestName] = {}
     ClassPower_SendMessage("CLEAR "..priestName)
+    self:SaveAssignments()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared assignments for "..priestName)
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
@@ -1411,6 +1431,7 @@ function Priest:SubButton_OnClick(btn)
     cur = f + (s * 4) + (sh * 16)
     self.Assignments[priestName][grpIdx] = cur
     ClassPower_SendMessage("ASSIGN "..priestName.." "..grpIdx.." "..cur)
+    self:SaveAssignments()
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
 end
@@ -1634,8 +1655,46 @@ function Priest:AssignTarget_OnClick()
     end
     
     self.UIDirty = true
+    self:SaveAssignments()
     self:UpdateUI()
     CloseDropDownMenus()
+end
+
+-----------------------------------------------------------------------------------
+-- Persistence (Save/Load Assignments)
+-----------------------------------------------------------------------------------
+
+function Priest:SaveAssignments()
+    -- Save all assignments (not just current player) for convenience
+    -- This allows raid leaders to set up assignments for everyone
+    PriestPower_Assignments = self.Assignments
+    PriestPower_LegacyAssignments = self.LegacyAssignments
+    
+    -- Debug output
+    for pname, assigns in pairs(self.Assignments) do
+        for grp, val in pairs(assigns) do
+            CP_Debug("Priest Save: "..pname.." G"..grp.." = "..tostring(val))
+        end
+    end
+    CP_Debug("Priest: Saved assignments")
+end
+
+function Priest:LoadAssignments()
+    -- Load saved assignments
+    if PriestPower_Assignments then
+        self.Assignments = PriestPower_Assignments
+        -- Debug output
+        for pname, assigns in pairs(self.Assignments) do
+            for grp, val in pairs(assigns) do
+                CP_Debug("Priest Load: "..pname.." G"..grp.." = "..tostring(val))
+            end
+        end
+        CP_Debug("Priest: Loaded group assignments")
+    end
+    if PriestPower_LegacyAssignments then
+        self.LegacyAssignments = PriestPower_LegacyAssignments
+        CP_Debug("Priest: Loaded champion assignments")
+    end
 end
 
 -----------------------------------------------------------------------------------
