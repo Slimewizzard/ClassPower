@@ -579,6 +579,29 @@ function Druid:GetGroupMinTimeRemaining(groupIndex)
     return minTime
 end
 
+-- Get Innervate cooldown remaining in seconds, or 0 if ready
+function Druid:GetInnervateCooldown()
+    -- Find Innervate spell slot
+    local i = 1
+    while true do
+        local spellName = GetSpellName(i, BOOKTYPE_SPELL)
+        if not spellName then break end
+        
+        if spellName == self.Spells.INNERVATE then
+            local start, duration = GetSpellCooldown(i, BOOKTYPE_SPELL)
+            if start and start > 0 and duration and duration > 0 then
+                local remaining = (start + duration) - GetTime()
+                if remaining > 0 then
+                    return remaining
+                end
+            end
+            return 0
+        end
+        i = i + 1
+    end
+    return 0
+end
+
 -----------------------------------------------------------------------------------
 -- Sync Protocol
 -----------------------------------------------------------------------------------
@@ -909,13 +932,33 @@ function Druid:UpdateBuffBar()
                 local status = self.CurrentBuffsByName[target]
                 
                 if status and not status.dead and manaPercent <= threshold then
+                    -- Target needs Innervate - check if on cooldown
+                    local cooldownRemaining = self:GetInnervateCooldown()
+                    local icon = getglobal(btnInn:GetName().."Icon")
+                    local txt = getglobal(btnInn:GetName().."Text")
+                    
                     btnInn:Show()
-                    btnInn.tooltipText = "Innervate: "..target.." ("..manaPercent.."%)"
-                    getglobal(btnInn:GetName().."Text"):SetText(manaPercent.."%")
-                    getglobal(btnInn:GetName().."Text"):SetTextColor(1, 0.5, 0)
+                    
+                    if cooldownRemaining > 0 then
+                        -- On cooldown - show dimmed with CD timer
+                        btnInn.tooltipText = "Innervate: "..target.." ("..manaPercent.."%)\nCooldown: "..CP_FormatTime(cooldownRemaining)
+                        if icon then icon:SetVertexColor(0.5, 0.5, 0.5) end  -- 50% dimmed
+                        txt:SetText(CP_FormatTime(cooldownRemaining))
+                        txt:SetTextColor(0.7, 0.7, 0.7)  -- Gray text for CD
+                    else
+                        -- Ready to cast - show normal
+                        btnInn.tooltipText = "Innervate: "..target.." ("..manaPercent.."%)"
+                        if icon then icon:SetVertexColor(1, 1, 1) end  -- Full brightness
+                        txt:SetText(manaPercent.."%")
+                        txt:SetTextColor(1, 0.5, 0)  -- Orange when ready
+                    end
+                    
                     showRow = true
                 else
                     btnInn:Hide()
+                    -- Reset icon color when hidden
+                    local icon = getglobal(btnInn:GetName().."Icon")
+                    if icon then icon:SetVertexColor(1, 1, 1) end
                 end
             else
                 btnInn:Hide()
@@ -1677,6 +1720,16 @@ function Druid:BuffButton_OnClick(btn)
                             CP_Debug("Casting "..spellName.." on "..member.name)
                             CastSpellByName(spellName)
                             TargetLastTarget()
+                            
+                            -- Reset timestamps for group when casting Gift of the Wild
+                            if spellName == self.Spells.GOTW and self.CurrentBuffs[gid] then
+                                for _, m in pairs(self.CurrentBuffs[gid]) do
+                                    if self.BuffTimestamps[m.name] then
+                                        self.BuffTimestamps[m.name].MotW = GetTime()
+                                    end
+                                end
+                            end
+                            
                             self:ScanRaid()
                             self:UpdateBuffBar()
                             return
