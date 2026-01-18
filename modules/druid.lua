@@ -71,6 +71,42 @@ Druid.ContextName = nil
 Druid.AssignMode = "Innervate"
 
 -----------------------------------------------------------------------------------
+-- Gear Scanning
+-----------------------------------------------------------------------------------
+
+function Druid:ScanGear()
+    local cenarionCount = 0
+    local stormrageCount = 0
+    
+    for i = 1, 19 do -- Scan all slots
+        local link = GetInventoryItemLink("player", i)
+        if link then
+            local _, _, name = string.find(link, "%[(.+)%]")
+            if name then
+                if string.find(name, "Cenarion") then cenarionCount = cenarionCount + 1 end
+                if string.find(name, "Stormrage") then stormrageCount = stormrageCount + 1 end
+            end
+        end
+    end
+    
+    -- Default 10 min
+    local newDuration = 600 
+    
+    if stormrageCount >= 3 then
+        -- Turtle WoW: T2 3-set gives +100% duration (20 min)
+        newDuration = 1200
+    elseif cenarionCount >= 3 then
+        -- T1 3-set gives +50% duration (15 min)
+        newDuration = 900
+    end
+    
+    if self.BuffDurations.Thorns ~= newDuration then
+        self.BuffDurations.Thorns = newDuration
+        CP_Debug("Thorns duration updated to "..newDuration.."s (Cenarion: "..cenarionCount..", Stormrage: "..stormrageCount..")")
+    end
+end
+
+-----------------------------------------------------------------------------------
 -- Module Lifecycle
 -----------------------------------------------------------------------------------
 
@@ -90,9 +126,21 @@ function Druid:OnLoad()
     -- Load saved group assignments and Innervate target
     self:LoadAssignments()
     
-    -- Initial spell scan
+    -- Initial scans
     self:ScanSpells()
+    self:ScanGear()
     self:ScanRaid()
+    
+    -- Create Event Frame for inventory changes
+    if not self.EventFrame then
+        self.EventFrame = CreateFrame("Frame")
+        self.EventFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
+        self.EventFrame:SetScript("OnEvent", function()
+            if event == "UNIT_INVENTORY_CHANGED" and arg1 == "player" then
+                Druid:ScanGear()
+            end
+        end)
+    end
     
     -- Create UI
     self:CreateBuffBar()
@@ -579,6 +627,27 @@ function Druid:GetGroupMinTimeRemaining(groupIndex)
     return minTime
 end
 
+-- Get minimum time remaining for Thorns across the Thorns list
+function Druid:GetThornsListMinTimeRemaining(druidName)
+    local minTime = nil
+    
+    if not self.ThornsList[druidName] then return nil end
+    
+    for _, targetName in ipairs(self.ThornsList[druidName]) do
+        local status = self.CurrentBuffsByName[targetName]
+        if status and status.hasThorns and not status.dead then
+            local remaining = self:GetEstimatedTimeRemaining(targetName, "Thorns")
+            if remaining then
+                if not minTime or remaining < minTime then
+                    minTime = remaining
+                end
+            end
+        end
+    end
+    
+    return minTime
+end
+
 -- Get Innervate cooldown remaining in seconds, or 0 if ready
 function Druid:GetInnervateCooldown()
     -- Find Innervate spell slot
@@ -881,11 +950,54 @@ function Druid:UpdateBuffBar()
             local btnThorns = getglobal(row:GetName().."Thorns")
             local missing, total = self:GetThornsMissing(pname)
             
-            if total > 0 and missing > 0 then
+            local displayMode = CP_PerUser.BuffDisplayMode or "missing"
+            local minTimeRemaining = self:GetThornsListMinTimeRemaining(pname)
+            local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
+            
+            local shouldShow = false
+            if displayMode == "always" then
+                shouldShow = (total > 0)
+            elseif displayMode == "timer" then
+                if missing > 0 then
+                    shouldShow = true
+                elseif minTimeRemaining and minTimeRemaining <= thresholdSeconds then
+                    shouldShow = true
+                end
+            else -- "missing" mode
+                shouldShow = (total > 0 and missing > 0)
+            end
+            
+            if shouldShow then
                 btnThorns:Show()
                 btnThorns.tooltipText = "Thorns List"
-                getglobal(btnThorns:GetName().."Text"):SetText((total-missing).."/"..total)
-                getglobal(btnThorns:GetName().."Text"):SetTextColor(1,0,0)
+                local txt = getglobal(btnThorns:GetName().."Text")
+                local icon = getglobal(btnThorns:GetName().."Icon")
+                
+                -- Display format based on mode
+                if displayMode == "always" or displayMode == "timer" then
+                    -- Show timer + missing count
+                    if minTimeRemaining and minTimeRemaining > 0 and missing == 0 then
+                        -- All buffed, show time remaining
+                        txt:SetText(CP_FormatTime(minTimeRemaining))
+                        txt:SetTextColor(0, 1, 0)
+                    elseif missing > 0 then
+                        -- Some missing
+                        if minTimeRemaining and minTimeRemaining > 0 then
+                            txt:SetText(missing.." ("..CP_FormatTime(minTimeRemaining)..")")
+                        else
+                            txt:SetText(missing.." miss")
+                        end
+                        txt:SetTextColor(1, 0, 0)
+                    else
+                        txt:SetText(total.."/"..total)
+                        txt:SetTextColor(0, 1, 0)
+                    end
+                else
+                    -- Original missing mode display
+                    txt:SetText((total-missing).."/"..total)
+                    txt:SetTextColor(1, 0, 0)
+                end
+                
                 showRow = true
             else
                 btnThorns:Hide()
