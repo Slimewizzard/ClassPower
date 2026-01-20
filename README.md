@@ -1,4 +1,4 @@
-ClassPower (formerly PriestPower)
+## ClassPower (formerly PriestPower)
 
 ClassPower is a buff management addon for World of Warcraft 1.12.1 (Turtle WoW). Inspired by the classic PallyPower, it simplifies raid-wide buff management for multiple classes.
 
