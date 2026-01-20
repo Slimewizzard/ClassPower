@@ -136,6 +136,12 @@ Priest.RosterDirty = false
 Priest.RosterTimer = 0.5
 Priest.UIDirty = false  -- New: only update UI when data changed
 
+-- Distributed Scanning
+Priest.ScanIndex = 1
+Priest.ScanStepSize = 5
+Priest.ScanFrequency = 0.1 -- Process batch every 0.1s
+Priest.ScanTimer = 0
+
 -- Context for dropdowns
 Priest.ContextName = nil
 Priest.AssignMode = "Champ"
@@ -271,6 +277,23 @@ function Priest:OnUpdate(elapsed)
             self:UpdateUI()
         end
     end
+    
+    -- Background distributed scanning
+    self.ScanTimer = self.ScanTimer - elapsed
+    if self.ScanTimer <= 0 then
+        self.ScanTimer = self.ScanFrequency
+        self:ScanStep()
+    end
+end
+
+function Priest:OnUnitUpdate(unit, name, event)
+    if not name then return end
+    
+    if event == "UNIT_AURA" then
+        -- Only trigger a partial scan for this unit
+        self:ScanUnit(unit, name)
+        self.UIDirty = true
+    end
 end
 
 function Priest:OnSlashCommand(msg)
@@ -392,6 +415,144 @@ end
 -- Raid/Buff Scanning
 -----------------------------------------------------------------------------------
 
+function Priest:ScanUnit(unit, name)
+    if not unit or not name then return end
+    
+    local subgroup = 1
+    local class = nil
+    
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i = 1, numRaid do
+            local rname, _, rsub, _, _, rclass = GetRaidRosterInfo(i)
+            if rname == name then
+                subgroup = rsub
+                class = rclass
+                break
+            end
+        end
+    else
+        _, class = UnitClass(unit)
+    end
+    
+    if class == "PRIEST" then
+        self.AllPriests[name] = self.AllPriests[name] or {
+            [0] = { rank = 0, talent = 0, name = "Fortitude" },
+            [1] = { rank = 0, talent = 0, name = "Spirit" },
+            [2] = { rank = 0, talent = 0, name = "Shadow" },
+            ["Proclaim"] = false,
+            ["Grace"] = false,
+            ["Empower"] = false,
+            ["Revive"] = false,
+            ["Enlighten"] = false,
+        }
+    end
+
+    if name and subgroup and subgroup >= 1 and subgroup <= 8 then
+        local buffInfo = {
+            name = name,
+            class = class,
+            visible = UnitIsVisible(unit),
+            dead = UnitIsDeadOrGhost(unit),
+            hasFort = false,
+            hasSpirit = false,
+            hasShadow = false,
+            hasProclaim = false,
+            hasGrace = false,
+            hasEmpower = false,
+            hasEnlighten = false,
+        }
+        
+        local b = 1
+        while true do
+            local bname = UnitBuff(unit, b)
+            if not bname then break end
+            
+            bname = string.lower(bname)
+            
+            -- Fortitude
+            if string.find(bname, "wordfortitude") then 
+                buffInfo.hasFort = true
+                buffInfo.isPrayerFort = false 
+            elseif string.find(bname, "prayeroffortitude") then 
+                buffInfo.hasFort = true 
+                buffInfo.isPrayerFort = true 
+            end
+            
+            -- Spirit
+            if string.find(bname, "divinespirit") then 
+                buffInfo.hasSpirit = true
+                buffInfo.isPrayerSpirit = false
+            elseif string.find(bname, "prayerofspirit") then 
+                buffInfo.hasSpirit = true
+                buffInfo.isPrayerSpirit = true 
+            elseif string.find(bname, "inspiration") then
+                 buffInfo.hasSpirit = true
+            end
+
+            -- Shadow Protection
+            if string.find(bname, "antishadow") then
+                buffInfo.hasShadow = true
+                buffInfo.isPrayerShadow = false
+            elseif string.find(bname, "prayerofshadowprotection") then
+                buffInfo.hasShadow = true
+                buffInfo.isPrayerShadow = true
+            end
+            
+            if string.find(bname, "proclaimchampion") or string.find(bname, "holychampion") then buffInfo.hasProclaim = true end
+            if string.find(bname, "championsgrace") then buffInfo.hasGrace = true end
+            if string.find(bname, "empowerchampion") then buffInfo.hasEmpower = true end
+            if string.find(bname, "btnholyscriptures") or string.find(bname, "enlighten") then buffInfo.hasEnlighten = true end
+            
+            b = b + 1
+        end
+        
+        -- Update timestamps
+        if not self.BuffTimestamps[name] then self.BuffTimestamps[name] = {} end
+        local ts = self.BuffTimestamps[name]
+        
+        local function UpdateTS(key, hasBuff, isPrayer)
+            if hasBuff then
+                local now = GetTime()
+                if not ts[key] then 
+                    ts[key] = { start = now, isPrayer = isPrayer }
+                elseif type(ts[key]) == "number" then
+                    ts[key] = { start = ts[key], isPrayer = isPrayer }
+                elseif ts[key].isPrayer ~= isPrayer then
+                    ts[key] = { start = now, isPrayer = isPrayer }
+                end
+            else
+                ts[key] = nil
+            end
+        end
+        
+        if UnitIsVisible(unit) then
+            UpdateTS("Fortitude", buffInfo.hasFort, buffInfo.isPrayerFort)
+            UpdateTS("Spirit", buffInfo.hasSpirit, buffInfo.isPrayerSpirit)
+            UpdateTS("Shadow", buffInfo.hasShadow, buffInfo.isPrayerShadow)
+            UpdateTS("Proclaim", buffInfo.hasProclaim)
+            UpdateTS("Grace", buffInfo.hasGrace)
+            UpdateTS("Empower", buffInfo.hasEmpower)
+            UpdateTS("Enlighten", buffInfo.hasEnlighten)
+        end
+        
+        -- Update the specific entry in CurrentBuffs
+        self.CurrentBuffs[subgroup] = self.CurrentBuffs[subgroup] or {}
+        local found = false
+        for i, m in ipairs(self.CurrentBuffs[subgroup]) do
+            if m.name == name then
+                self.CurrentBuffs[subgroup][i] = buffInfo
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(self.CurrentBuffs[subgroup], buffInfo)
+        end
+        self.CurrentBuffsByName[name] = buffInfo
+    end
+end
+
 function Priest:ScanRaid()
     self.CurrentBuffs = {}
     for i = 1, 8 do self.CurrentBuffs[i] = {} end
@@ -405,138 +566,24 @@ function Priest:ScanRaid()
         foundPriests[UnitName("player")] = true
     end
     
-    local function ProcessUnit(unit, name, subgroup, class)
-        local isValid = (unit == "player") or string.find(unit, "^party%d+$") or string.find(unit, "^raid%d+$")
-        if not isValid or not UnitExists(unit) then return end
-        
-        if name and class == "PRIEST" then
-            foundPriests[name] = true
-            if not self.AllPriests[name] then
-                self.AllPriests[name] = {
-                    [0] = { rank = 0, talent = 0, name = "Fortitude" },
-                    [1] = { rank = 0, talent = 0, name = "Spirit" },
-                    [2] = { rank = 0, talent = 0, name = "Shadow" },
-                    ["Proclaim"] = false,
-                    ["Grace"] = false,
-                    ["Empower"] = false,
-                    ["Revive"] = false,
-                    ["Enlighten"] = false,
-                }
-            end
-        end
-        
-        if name and subgroup and subgroup >= 1 and subgroup <= 8 then
-            local buffInfo = {
-                name = name,
-                class = class,
-                visible = UnitIsVisible(unit),
-                dead = UnitIsDeadOrGhost(unit),
-                hasFort = false,
-                hasSpirit = false,
-                hasShadow = false,
-                hasProclaim = false,
-                hasGrace = false,
-                hasEmpower = false,
-                hasEnlighten = false,
-            }
-            
-            local b = 1
-            while true do
-                local bname = UnitBuff(unit, b)
-                if not bname then break end
-                
-                bname = string.lower(bname)
-                
-                -- Fortitude
-                if string.find(bname, "wordfortitude") then 
-                    buffInfo.hasFort = true
-                    buffInfo.isPrayerFort = false 
-                elseif string.find(bname, "prayeroffortitude") then 
-                    buffInfo.hasFort = true 
-                    buffInfo.isPrayerFort = true 
-                end
-                
-                -- Spirit
-                if string.find(bname, "divinespirit") then 
-                    buffInfo.hasSpirit = true
-                    buffInfo.isPrayerSpirit = false
-                elseif string.find(bname, "prayerofspirit") then 
-                    buffInfo.hasSpirit = true
-                    buffInfo.isPrayerSpirit = true 
-                elseif string.find(bname, "inspiration") then
-                     buffInfo.hasSpirit = true -- Legacy behavior? Or maybe mistake? Keeping safe.
-                end
-
-                -- Shadow Protection
-                if string.find(bname, "antishadow") then
-                    buffInfo.hasShadow = true
-                    buffInfo.isPrayerShadow = false
-                elseif string.find(bname, "prayerofshadowprotection") then
-                    buffInfo.hasShadow = true
-                    buffInfo.isPrayerShadow = true
-                elseif string.find(bname, "shadow") and string.find(bname, "protection") then
-                    -- Fallback for weird naming?
-                    buffInfo.hasShadow = true
-                end
-                
-                if string.find(bname, "proclaimchampion") or string.find(bname, "holychampion") then buffInfo.hasProclaim = true end
-                if string.find(bname, "championsgrace") then buffInfo.hasGrace = true end
-                if string.find(bname, "empowerchampion") then buffInfo.hasEmpower = true end
-                if string.find(bname, "btnholyscriptures") or string.find(bname, "enlighten") then buffInfo.hasEnlighten = true end
-                
-                b = b + 1
-            end
-            
-            -- Update timestamps
-            if not self.BuffTimestamps[name] then self.BuffTimestamps[name] = {} end
-            local ts = self.BuffTimestamps[name]
-            
-            local function UpdateTS(key, hasBuff, isPrayer)
-                if hasBuff then
-                    local now = GetTime()
-                    if not ts[key] then 
-                        ts[key] = { start = now, isPrayer = isPrayer }
-                    elseif type(ts[key]) == "number" then
-                        -- Convert legacy number to table
-                        ts[key] = { start = ts[key], isPrayer = isPrayer }
-                    elseif ts[key].isPrayer ~= isPrayer then
-                        -- Type changed (Single <-> Prayer), reset time
-                        ts[key] = { start = now, isPrayer = isPrayer }
-                    end
-                else
-                    ts[key] = nil
-                end
-            end
-            
-            if UnitIsVisible(unit) then
-                UpdateTS("Fortitude", buffInfo.hasFort, buffInfo.isPrayerFort)
-                UpdateTS("Spirit", buffInfo.hasSpirit, buffInfo.isPrayerSpirit)
-                UpdateTS("Shadow", buffInfo.hasShadow, buffInfo.isPrayerShadow)
-                UpdateTS("Proclaim", buffInfo.hasProclaim)
-                UpdateTS("Grace", buffInfo.hasGrace)
-                UpdateTS("Empower", buffInfo.hasEmpower)
-                UpdateTS("Enlighten", buffInfo.hasEnlighten)
-            end
-            
-            if not self.CurrentBuffs[subgroup] then self.CurrentBuffs[subgroup] = {} end
-            table.insert(self.CurrentBuffs[subgroup], buffInfo)
-            self.CurrentBuffsByName[name] = buffInfo
-        end
-    end
-    
     if numRaid > 0 then
         for i = 1, numRaid do
             local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
-            ProcessUnit("raid"..i, name, subgroup, class)
+            self:ScanUnit("raid"..i, name)
+            if class == "PRIEST" then foundPriests[name] = true end
         end
     elseif numParty > 0 then
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Priest" then foundPriests[UnitName("player")] = true end
         for i = 1, numParty do
             local name = UnitName("party"..i)
             local _, class = UnitClass("party"..i)
-            ProcessUnit("party"..i, name, 1, class)
+            self:ScanUnit("party"..i, name)
+            if class == "PRIEST" then foundPriests[name] = true end
         end
-        local _, pClass = UnitClass("player")
-        ProcessUnit("player", UnitName("player"), 1, pClass)
+    else
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Priest" then foundPriests[UnitName("player")] = true end
     end
     
     -- Cleanup priests who left
@@ -546,6 +593,38 @@ function Priest:ScanRaid()
             self.Assignments[name] = nil
         end
     end
+    
+    self.ScanIndex = 1
+end
+
+function Priest:ScanStep()
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    local count = 0
+    if numRaid > 0 then
+        while count < self.ScanStepSize do
+            if self.ScanIndex > numRaid then self.ScanIndex = 1 end
+            local name = GetRaidRosterInfo(self.ScanIndex)
+            if name then
+                self:ScanUnit("raid"..self.ScanIndex, name)
+                count = count + 1
+            end
+            self.ScanIndex = self.ScanIndex + 1
+            if self.ScanIndex > numRaid then break end
+        end
+    elseif numParty > 0 then
+        if self.ScanIndex > (numParty + 1) then self.ScanIndex = 1 end
+        if self.ScanIndex == 1 then
+            self:ScanUnit("player", UnitName("player"))
+        else
+            local idx = self.ScanIndex - 1
+            self:ScanUnit("party"..idx, UnitName("party"..idx))
+        end
+        self.ScanIndex = self.ScanIndex + 1
+    end
+    
+    self.UIDirty = true
 end
 
 -----------------------------------------------------------------------------------

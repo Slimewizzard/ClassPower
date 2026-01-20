@@ -69,6 +69,16 @@ Druid.RosterDirty = false
 Druid.RosterTimer = 0.5
 Druid.UIDirty = false  -- Only update UI when data changed
 
+-- Distributed Scanning
+Druid.ScanIndex = 1
+Druid.ScanGroup = 1
+Druid.ScanStepSize = 5
+Druid.ScanFrequency = 0.1 -- Process batch every 0.1s
+Druid.ScanTimer = 0
+
+-- Texture Cache for deep optimization
+Druid.UnitTextureCache = {}
+
 -- Context for dropdowns
 Druid.ContextName = nil
 Druid.AssignMode = "Innervate"
@@ -239,6 +249,30 @@ function Druid:OnUpdate(elapsed)
             self:UpdateUI()
         end
     end
+    
+    -- Background distributed scanning
+    self.ScanTimer = self.ScanTimer - elapsed
+    if self.ScanTimer <= 0 then
+        self.ScanTimer = self.ScanFrequency
+        self:ScanStep()
+    end
+end
+
+function Druid:OnUnitUpdate(unit, name, event)
+    if not name then return end
+    
+    if event == "UNIT_AURA" then
+        -- Only trigger a partial scan for this unit
+        self:ScanUnit(unit, name)
+        self.UIDirty = true
+    elseif event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
+        -- Only trigger UI update if this is our Innervate target
+        local pname = UnitName("player")
+        local target = self.LegacyAssignments[pname] and self.LegacyAssignments[pname]["Innervate"]
+        if name == target then
+            self.UIDirty = true
+        end
+    end
 end
 
 function Druid:OnSlashCommand(msg)
@@ -365,7 +399,140 @@ end
 -- Raid/Buff Scanning
 -----------------------------------------------------------------------------------
 
+function Druid:ScanUnit(unit, name)
+    if not unit or not name then return end
+    
+    -- Get subgroup and class if not already known
+    local subgroup = 1
+    local class = nil
+    
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i = 1, numRaid do
+            local rname, _, rsub, _, _, rclass = GetRaidRosterInfo(i)
+            if rname == name then
+                subgroup = rsub
+                class = rclass
+                break
+            end
+        end
+    else
+        _, class = UnitClass(unit)
+    end
+    
+    if class == "DRUID" then
+        self.AllDruids[name] = self.AllDruids[name] or {
+            [0] = { rank = 0, talent = 0, name = "MotW" },
+            [1] = { rank = 0, talent = 0, name = "Thorns" },
+            ["Emerald"] = false,
+            ["Innervate"] = false,
+        }
+    end
+
+    if subgroup and subgroup >= 1 and subgroup <= 8 then
+        local buffInfo = {
+            name = name,
+            class = class,
+            visible = UnitIsVisible(unit),
+            dead = UnitIsDeadOrGhost(unit),
+            hasMotW = false,
+            hasThorns = false,
+            hasEmerald = false,
+        }
+        
+        -- Initialize timestamp tracking for this player
+        if not self.BuffTimestamps[name] then
+            self.BuffTimestamps[name] = {}
+        end
+        
+        -- Check Texture Cache
+        local b = 1
+        local textureHash = ""
+        while true do
+            local tex = UnitBuff(unit, b)
+            if not tex then break end
+            textureHash = textureHash .. tex
+            b = b + 1
+        end
+        
+        -- If textures haven't changed, skip heavy scanning
+        if self.UnitTextureCache[name] == textureHash then
+            -- Update simple flags from current buff info if exists
+            local prev = self.CurrentBuffsByName[name]
+            if prev then
+                prev.visible = UnitIsVisible(unit)
+                prev.dead = UnitIsDeadOrGhost(unit)
+            end
+            return 
+        end
+        self.UnitTextureCache[name] = textureHash
+
+        b = 1
+        local foundTextures = ""
+        while true do
+            local buffTexture = UnitBuff(unit, b)
+            if not buffTexture then break end
+            
+            buffTexture = string.lower(buffTexture)
+            foundTextures = foundTextures .. buffTexture
+            
+            -- Mark of the Wild & Gift of the Wild both use: Spell_Nature_Regeneration
+            if string.find(buffTexture, "regeneration") then 
+                buffInfo.hasMotW = true
+                -- Distinguish Gift vs Mark using tooltip only if something changed or timestamp missing
+                if not self.BuffTimestamps[name].MotW then
+                    scanTooltip:SetUnitBuff(unit, b)
+                    local tipText = ClassPowerDruidScanTooltipTextLeft1:GetText()
+                    local isGift = (tipText == "Gift of the Wild")
+                    self.BuffTimestamps[name].MotW = GetTime()
+                    self.BuffTimestamps[name].isGift = isGift
+                end
+            end
+            
+            -- Thorns: Spell_Nature_Thorns
+            if string.find(buffTexture, "thorns") then 
+                buffInfo.hasThorns = true
+                if not self.BuffTimestamps[name].Thorns then
+                    self.BuffTimestamps[name].Thorns = GetTime()
+                end
+            end
+            
+            -- Emerald Blessing: Spell_Nature_ProtectionformNature
+            if string.find(buffTexture, "protectionformnature") then 
+                buffInfo.hasEmerald = true
+                if not self.BuffTimestamps[name].Emerald then
+                    self.BuffTimestamps[name].Emerald = GetTime()
+                end
+            end
+            
+            b = b + 1
+        end
+
+        -- Texture count/content change detection for resetting timestamps
+        -- (Simple version: if they don't have the buff, clear the timestamp)
+        if not buffInfo.hasMotW then self.BuffTimestamps[name].MotW = nil end
+        if not buffInfo.hasThorns then self.BuffTimestamps[name].Thorns = nil end
+        if not buffInfo.hasEmerald then self.BuffTimestamps[name].Emerald = nil end
+
+        -- Update the specific entry in CurrentBuffs
+        self.CurrentBuffs[subgroup] = self.CurrentBuffs[subgroup] or {}
+        local found = false
+        for i, m in ipairs(self.CurrentBuffs[subgroup]) do
+            if m.name == name then
+                self.CurrentBuffs[subgroup][i] = buffInfo
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(self.CurrentBuffs[subgroup], buffInfo)
+        end
+        self.CurrentBuffsByName[name] = buffInfo
+    end
+end
+
 function Druid:ScanRaid()
+    -- Full scan resets everything and does it all at once (for roster changes)
     self.CurrentBuffs = {}
     for i = 1, 8 do self.CurrentBuffs[i] = {} end
     self.CurrentBuffsByName = {}
@@ -377,110 +544,25 @@ function Druid:ScanRaid()
     if UnitClass("player") == "Druid" then
         foundDruids[UnitName("player")] = true
     end
-    
-    local function ProcessUnit(unit, name, subgroup, class)
-        local isValid = (unit == "player") or string.find(unit, "^party%d+$") or string.find(unit, "^raid%d+$")
-        if not isValid or not UnitExists(unit) then return end
-        
-        if name and class == "DRUID" then
-            foundDruids[name] = true
-            if not self.AllDruids[name] then
-                self.AllDruids[name] = {
-                    [0] = { rank = 0, talent = 0, name = "MotW" },
-                    [1] = { rank = 0, talent = 0, name = "Thorns" },
-                    ["Emerald"] = false,
-                    ["Innervate"] = false,
-                }
-            end
-        end
-        
-        if name and subgroup and subgroup >= 1 and subgroup <= 8 then
-            local buffInfo = {
-                name = name,
-                class = class,
-                visible = UnitIsVisible(unit),
-                dead = UnitIsDeadOrGhost(unit),
-                hasMotW = false,
-                hasThorns = false,
-                hasEmerald = false,
-            }
-            
-            -- Initialize timestamp tracking for this player
-            if not self.BuffTimestamps[name] then
-                self.BuffTimestamps[name] = {}
-            end
-            
-            local b = 1
-            while true do
-                local buffTexture = UnitBuff(unit, b)
-                if not buffTexture then break end
-                
-                -- UnitBuff returns the texture path, convert to lowercase for matching
-                buffTexture = string.lower(buffTexture)
-                
-                -- Mark of the Wild & Gift of the Wild both use: Spell_Nature_Regeneration
-                if string.find(buffTexture, "regeneration") then 
-                    buffInfo.hasMotW = true
-                    
-                    -- Check Tooltip for "Gift of the Wild" vs "Mark of the Wild"
-                    scanTooltip:SetUnitBuff(unit, b)
-                    local tipText = ClassPowerDruidScanTooltipTextLeft1:GetText()
-                    local isGift = (tipText == "Gift of the Wild")
-                    
-                    if not self.BuffTimestamps[name] then self.BuffTimestamps[name] = {} end
-                    
-                    -- Update timestamp if new or type changed
-                    if not self.BuffTimestamps[name].MotW or self.BuffTimestamps[name].isGift ~= isGift then
-                        self.BuffTimestamps[name].MotW = GetTime()
-                        self.BuffTimestamps[name].isGift = isGift
-                    end
-                end
-                
-                -- Thorns: Spell_Nature_Thorns
-                if string.find(buffTexture, "thorns") then 
-                    buffInfo.hasThorns = true
-                    if not self.BuffTimestamps[name].Thorns then
-                        self.BuffTimestamps[name].Thorns = GetTime()
-                    end
-                end
-                
-                -- Emerald Blessing: Spell_Nature_ProtectionformNature
-                if string.find(buffTexture, "protectionformnature") then 
-                    buffInfo.hasEmerald = true
-                    if not self.BuffTimestamps[name].Emerald then
-                        self.BuffTimestamps[name].Emerald = GetTime()
-                    end
-                end
-                
-                b = b + 1
-            end
-            
-            -- Clear timestamps for buffs that are no longer present (only if visible)
-            if UnitIsVisible(unit) then
-                if not buffInfo.hasMotW then self.BuffTimestamps[name].MotW = nil end
-                if not buffInfo.hasThorns then self.BuffTimestamps[name].Thorns = nil end
-                if not buffInfo.hasEmerald then self.BuffTimestamps[name].Emerald = nil end
-            end
-            
-            if not self.CurrentBuffs[subgroup] then self.CurrentBuffs[subgroup] = {} end
-            table.insert(self.CurrentBuffs[subgroup], buffInfo)
-            self.CurrentBuffsByName[name] = buffInfo
-        end
-    end
-    
+
     if numRaid > 0 then
         for i = 1, numRaid do
             local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
-            ProcessUnit("raid"..i, name, subgroup, class)
+            self:ScanUnit("raid"..i, name)
+            if class == "DRUID" then foundDruids[name] = true end
         end
     elseif numParty > 0 then
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Druid" then foundDruids[UnitName("player")] = true end
         for i = 1, numParty do
             local name = UnitName("party"..i)
             local _, class = UnitClass("party"..i)
-            ProcessUnit("party"..i, name, 1, class)
+            self:ScanUnit("party"..i, name)
+            if class == "DRUID" then foundDruids[name] = true end
         end
-        local _, pClass = UnitClass("player")
-        ProcessUnit("player", UnitName("player"), 1, pClass)
+    else
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Druid" then foundDruids[UnitName("player")] = true end
     end
     
     -- Cleanup druids who left
@@ -490,6 +572,39 @@ function Druid:ScanRaid()
             self.Assignments[name] = nil
         end
     end
+    
+    self.ScanIndex = 1
+end
+
+function Druid:ScanStep()
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    local count = 0
+    if numRaid > 0 then
+        while count < self.ScanStepSize do
+            if self.ScanIndex > numRaid then self.ScanIndex = 1 end
+            local name = GetRaidRosterInfo(self.ScanIndex)
+            if name then
+                self:ScanUnit("raid"..self.ScanIndex, name)
+                count = count + 1
+            end
+            self.ScanIndex = self.ScanIndex + 1
+            if self.ScanIndex > numRaid then break end
+        end
+    elseif numParty > 0 then
+        -- Party scanning is small enough to do in one step usually, but keep logic consistent
+        if self.ScanIndex > (numParty + 1) then self.ScanIndex = 1 end
+        if self.ScanIndex == 1 then
+            self:ScanUnit("player", UnitName("player"))
+        else
+            local idx = self.ScanIndex - 1
+            self:ScanUnit("party"..idx, UnitName("party"..idx))
+        end
+        self.ScanIndex = self.ScanIndex + 1
+    end
+    
+    self.UIDirty = true
 end
 
 -----------------------------------------------------------------------------------
