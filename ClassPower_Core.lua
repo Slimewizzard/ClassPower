@@ -27,6 +27,9 @@ local DEFAULT_CONFIG = {
     TimerThresholdSeconds = 0,
 }
 
+ClassPower.SyncTimer = 0 -- Throttling timer
+ClassPower.SyncDirty = false -- Flag for pending broadcast
+
 -- Prefix for addon messages
 CP_PREFIX = "CLPWR"
 
@@ -373,6 +376,17 @@ function ClassPower_OnEvent(event)
                 end
             end
         end
+    elseif event == "UNIT_AURA" or event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
+        -- Mark specific module as dirty for specific unit
+        local unit = arg1
+        if unit then
+            local name = UnitName(unit)
+            for _, mod in pairs(ClassPower.modules) do
+                if mod.OnUnitUpdate then
+                    mod:OnUnitUpdate(unit, name, event)
+                end
+            end
+        end
     else
         -- Pass other events to active module
         if ClassPower.activeModule and ClassPower.activeModule.OnEvent then
@@ -385,6 +399,14 @@ function ClassPower_OnUpdate(elapsed)
     -- Always run active module's OnUpdate
     if ClassPower.activeModule and ClassPower.activeModule.OnUpdate then
         ClassPower.activeModule:OnUpdate(elapsed)
+    end
+    
+    -- Throttled Tank Sync
+    if ClassPower.SyncDirty then
+        ClassPower.SyncTimer = ClassPower.SyncTimer - elapsed
+        if ClassPower.SyncTimer <= 0 then
+            ClassPower:SendTankSync()
+        end
     end
     
     -- Also check other loaded modules with visible config windows (for admin panel)
@@ -419,6 +441,9 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
 eventFrame:RegisterEvent("RAID_ROSTER_UPDATE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
+eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("UNIT_MANA")
+eventFrame:RegisterEvent("UNIT_MAXMANA")
 
 eventFrame:SetScript("OnEvent", function() ClassPower_OnEvent(event) end)
 eventFrame:SetScript("OnUpdate", function() ClassPower_OnUpdate(arg1) end)
@@ -1186,7 +1211,7 @@ function ClassPower:CreateTankManagerWindow()
                 if t then
                     t.mark = mark
                     ClassPower:UpdateTankListUI()
-                    ClassPower:SendTankSync()
+                    ClassPower:BroadcastTankList()
                 end
                 CloseDropDownMenus()
             end
@@ -1243,7 +1268,7 @@ function ClassPower:CreateTankManagerWindow()
                 tank.role = (tank.role == "MT") and "OT" or "MT"
                 this:SetText(tank.role)
                 ClassPower:UpdateTankListUI()
-                ClassPower:SendTankSync()
+                ClassPower:BroadcastTankList()
             end
         end)
         
@@ -1395,7 +1420,15 @@ SlashCmdList["CLASSPOWER"] = ClassPower_SlashHandler
 -- Tank Sync
 -----------------------------------------------------------------------------------
 
+function ClassPower:BroadcastTankList()
+    -- Latent broadcast (throttled)
+    self.SyncDirty = true
+    self.SyncTimer = 0.3 -- Send after 300ms of no changes
+end
+
 function ClassPower:SendTankSync()
+    self.SyncDirty = false
+    self.SyncTimer = 0
     local msg = "TANKSYNC"
     for _, tank in ipairs(ClassPower_TankList) do
         msg = msg .. " " .. tank.name .. "," .. (tank.role or "MT") .. "," .. (tank.mark or 0)

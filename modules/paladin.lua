@@ -198,6 +198,12 @@ Paladin.RosterDirty = false
 Paladin.RosterTimer = 0.5
 Paladin.UIDirty = false
 
+-- Distributed Scanning
+Paladin.ScanIndex = 1
+Paladin.ScanStepSize = 5
+Paladin.ScanFrequency = 0.1 -- Process batch every 0.1s
+Paladin.ScanTimer = 0
+
 -- Context for dropdowns
 Paladin.ContextName = nil
 Paladin.ContextClass = nil
@@ -236,6 +242,51 @@ function Paladin:OnLoad()
     
     -- Request sync from other paladins
     self:RequestSync()
+end
+
+function Paladin:OnUpdate(elapsed)
+    if not elapsed then elapsed = 0.01 end
+    
+    -- Delayed roster scan
+    if self.RosterDirty then
+        self.RosterTimer = self.RosterTimer - elapsed
+        if self.RosterTimer <= 0 then
+            self.RosterDirty = false
+            self.RosterTimer = 0.5
+            self:ScanRaid()
+            self.UIDirty = true
+        end
+    end
+    
+    -- Periodic full scan (slow)
+    self.UpdateTimer = self.UpdateTimer - elapsed
+    if self.UpdateTimer <= 0 then
+        self.UpdateTimer = 10.0 -- Full scan every 10 seconds (excessive polling reduced)
+        self:ScanRaid()
+        self:UpdateUI()
+    elseif self.UIDirty then
+        self.UIDirty = false
+        if (self.BuffBar and self.BuffBar:IsVisible()) or 
+           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+            self:UpdateUI()
+        end
+    end
+    
+    -- Background distributed scanning
+    self.ScanTimer = self.ScanTimer - elapsed
+    if self.ScanTimer <= 0 then
+        self.ScanTimer = self.ScanFrequency
+        self:ScanStep()
+    end
+end
+
+function Paladin:OnUnitUpdate(unit, name, event)
+    if not name then return end
+    
+    if event == "UNIT_AURA" then
+        self:ScanUnit(unit, name)
+        self.UIDirty = true
+    end
 end
 
 function Paladin:OnEvent(event)
@@ -481,11 +532,92 @@ end
 -- Raid/Buff Scanning
 -----------------------------------------------------------------------------------
 
+function Paladin:ScanUnit(unit, name)
+    if not unit or not name then return end
+    
+    local _, class = UnitClass(unit)
+    local classID = self:GetClassID(class)
+    if classID < 0 then return end
+    
+    if class == "PALADIN" then
+        if not self.AllPaladins[name] then
+            self.AllPaladins[name] = {}
+            for id = 0, 5 do
+                self.AllPaladins[name][id] = nil
+            end
+            self.AllPaladins[name].auras = {}
+        end
+    end
+    
+    local buffInfo = {
+        name = name,
+        unit = unit,
+        class = class,
+        visible = UnitIsVisible(unit),
+        dead = UnitIsDeadOrGhost(unit),
+    }
+    
+    for bID = 0, 5 do
+        buffInfo[bID] = false
+    end
+    
+    local isGreater = {}
+    
+    local b = 1
+    while true do
+        local buffTexture = UnitBuff(unit, b)
+        if not buffTexture then break end
+        
+        buffTexture = string.lower(buffTexture)
+        
+        if string.find(buffTexture, "wisdom") then buffInfo[0] = true; isGreater[0] = string.find(buffTexture, "greater") end
+        if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "greaterblessingofkings") then buffInfo[1] = true; isGreater[1] = string.find(buffTexture, "greater") end
+        if string.find(buffTexture, "salvation") then buffInfo[2] = true; isGreater[2] = string.find(buffTexture, "greater") end
+        if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "greaterblessingoflight") then buffInfo[3] = true; isGreater[3] = string.find(buffTexture, "greater") end
+        if string.find(buffTexture, "magearmor") or string.find(buffTexture, "magic_greaterblessingofkings") then buffInfo[4] = true; isGreater[4] = string.find(buffTexture, "greater") end
+        if string.find(buffTexture, "lightningshield") or string.find(buffTexture, "sanctuary") then 
+            buffInfo[5] = true
+            isGreater[5] = (not string.find(buffTexture, "lightningshield"))
+        end
+        
+        b = b + 1
+    end
+    
+    -- Update timestamps
+    if UnitIsVisible(unit) then
+        if not self.BuffTimestamps[name] then self.BuffTimestamps[name] = {} end
+        for bID = 0, 5 do
+            if buffInfo[bID] then
+                if not self.BuffTimestamps[name][bID] then
+                    self.BuffTimestamps[name][bID] = { startTime = GetTime(), isGreater = isGreater[bID] }
+                elseif self.BuffTimestamps[name][bID].isGreater ~= isGreater[bID] then
+                    self.BuffTimestamps[name][bID].isGreater = isGreater[bID]
+                    self.BuffTimestamps[name][bID].startTime = GetTime()
+                end
+            else
+                self.BuffTimestamps[name][bID] = nil
+            end
+        end
+    end
+    
+    -- Update the specific entry in CurrentBuffsByClass
+    self.CurrentBuffsByClass[classID] = self.CurrentBuffsByClass[classID] or {}
+    local found = false
+    for i, m in ipairs(self.CurrentBuffsByClass[classID]) do
+        if m.name == name then
+            self.CurrentBuffsByClass[classID][i] = buffInfo
+            found = true
+            break
+        end
+    end
+    if not found then
+        table.insert(self.CurrentBuffsByClass[classID], buffInfo)
+    end
+end
+
 function Paladin:ScanRaid()
     self.CurrentBuffsByClass = {}
-    for classID = 0, 9 do
-        self.CurrentBuffsByClass[classID] = {}
-    end
+    for classID = 0, 9 do self.CurrentBuffsByClass[classID] = {} end
     
     local numRaid = GetNumRaidMembers()
     local numParty = GetNumPartyMembers()
@@ -495,188 +627,34 @@ function Paladin:ScanRaid()
         foundPaladins[UnitName("player")] = true
     end
     
-    local function UpdateTS(name, bID, hasBuff, isGreater)
-        if not self.BuffTimestamps then self.BuffTimestamps = {} end
-        if not self.BuffTimestamps[name] then self.BuffTimestamps[name] = {} end
-        if hasBuff then
-            if not self.BuffTimestamps[name][bID] then
-                self.BuffTimestamps[name][bID] = { startTime = GetTime(), isGreater = isGreater }
-            else
-                -- Update isGreater status if it changed
-                if self.BuffTimestamps[name][bID].isGreater ~= isGreater then
-                    self.BuffTimestamps[name][bID].isGreater = isGreater
-                    self.BuffTimestamps[name][bID].startTime = GetTime()
-                end
-            end
-        else
-            self.BuffTimestamps[name][bID] = nil
-        end
-    end
-    
-    local function ProcessUnit(unit, name, class)
-        if not UnitExists(unit) or not name then return end
-        
-        local classID = self:GetClassID(class)
-        if classID < 0 then return end
-        
-        if class == "PALADIN" then
-            foundPaladins[name] = true
-            if not self.AllPaladins[name] then
-                self.AllPaladins[name] = {}
-                for id = 0, 5 do
-                    self.AllPaladins[name][id] = nil
-                end
-                self.AllPaladins[name].auras = {}
-            end
-        end
-        
-        local buffInfo = {
-            name = name,
-            unit = unit,
-            class = class,
-            visible = UnitIsVisible(unit),
-            dead = UnitIsDeadOrGhost(unit),
-        }
-        
-        for bID = 0, 5 do
-            buffInfo[bID] = false
-        end
-        
-        local isGreater = {}
-        
-        local b = 1
-        while true do
-            local buffTexture = UnitBuff(unit, b)
-            if not buffTexture then break end
-            
-            buffTexture = string.lower(buffTexture)
-            
-            -- Wisdom: Normal=SealOfWisdom, Greater=GreaterBlessingofWisdom
-            if string.find(buffTexture, "wisdom") then 
-                buffInfo[0] = true 
-                isGreater[0] = string.find(buffTexture, "greater") 
-            end
-            
-            -- Might: Normal=FistOfJustice, Greater=GreaterBlessingofKings
-            if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "greaterblessingofkings") then 
-                buffInfo[1] = true
-                isGreater[1] = string.find(buffTexture, "greater")
-            end
-            
-            -- Salvation: Normal=SealOfSalvation, Greater=GreaterBlessingofSalvation
-            if string.find(buffTexture, "salvation") then 
-                buffInfo[2] = true
-                isGreater[2] = string.find(buffTexture, "greater")
-            end
-            
-            -- Light: Normal=PrayerOfHealing02, Greater=GreaterBlessingofLight
-            if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "greaterblessingoflight") then 
-                buffInfo[3] = true 
-                isGreater[3] = string.find(buffTexture, "greater")
-            end
-            
-            -- Kings: Normal=MageArmor, Greater=Magic_GreaterBlessingofKings
-            if string.find(buffTexture, "magearmor") or string.find(buffTexture, "magic_greaterblessingofkings") then 
-                buffInfo[4] = true 
-                isGreater[4] = string.find(buffTexture, "greater")
-            end
-            
-            -- Sanctuary: Normal=LightningShield, Greater=GreaterBlessingofSanctuary
-            if string.find(buffTexture, "lightningshield") or string.find(buffTexture, "sanctuary") then 
-                buffInfo[5] = true
-                isGreater[5] = string.find(buffTexture, "greater") or string.find(buffTexture, "sanctuary") -- Sanctuary is in both names, but LightningShield is normal
-                if string.find(buffTexture, "lightningshield") then isGreater[5] = false end
-            end
-            
-            b = b + 1
-        end
-        
-        -- Update Timestamps (only if visible, otherwise we can't trust UnitBuff absence)
-        if UnitIsVisible(unit) then
-            for bID = 0, 5 do
-                UpdateTS(name, bID, buffInfo[bID], isGreater[bID])
-            end
-        end
-        
-        table.insert(self.CurrentBuffsByClass[classID], buffInfo)
-    end
-    
-    local function ProcessPet(unit)
-        if not UnitExists(unit) then return end
-        local name = UnitName(unit)
-        if not name then return end
-        
-        local buffInfo = {
-            name = name,
-            unit = unit,
-            class = "PET",
-            visible = UnitIsVisible(unit),
-            dead = UnitIsDeadOrGhost(unit),
-        }
-        
-        for bID = 0, 5 do
-            buffInfo[bID] = false
-        end
-        
-        local isGreater = {}
-        
-        local b = 1
-        while true do
-            local buffTexture = UnitBuff(unit, b)
-            if not buffTexture then break end
-            buffTexture = string.lower(buffTexture)
-            
-            if string.find(buffTexture, "wisdom") then buffInfo[0] = true; isGreater[0] = string.find(buffTexture, "greater") end
-            if string.find(buffTexture, "fistofjustice") or string.find(buffTexture, "greaterblessingofkings") then buffInfo[1] = true; isGreater[1] = string.find(buffTexture, "greater") end
-            if string.find(buffTexture, "salvation") then buffInfo[2] = true; isGreater[2] = string.find(buffTexture, "greater") end
-            if string.find(buffTexture, "prayerofhealing") or string.find(buffTexture, "greaterblessingoflight") then buffInfo[3] = true; isGreater[3] = string.find(buffTexture, "greater") end
-            if string.find(buffTexture, "magearmor") or string.find(buffTexture, "magic_greaterblessingofkings") then buffInfo[4] = true; isGreater[4] = string.find(buffTexture, "greater") end
-            if string.find(buffTexture, "lightningshield") or string.find(buffTexture, "sanctuary") then 
-                buffInfo[5] = true
-                isGreater[5] = (not string.find(buffTexture, "lightningshield"))
-            end
-            
-            b = b + 1
-        end
-        
-        -- Update Timestamps (only if visible)
-        if UnitIsVisible(unit) then
-            for bID = 0, 5 do
-                UpdateTS(name, bID, buffInfo[bID], isGreater[bID])
-            end
-        end
-        
-        table.insert(self.CurrentBuffsByClass[9], buffInfo)
-    end
-    
     if numRaid > 0 then
         for i = 1, numRaid do
             local name, _, _, _, _, class = GetRaidRosterInfo(i)
-            ProcessUnit("raid"..i, name, class)
+            self:ScanUnit("raid"..i, name)
+            if class == "PALADIN" then foundPaladins[name] = true end
             
             local petUnit = "raidpet"..i
-            if UnitExists(petUnit) then
-                ProcessPet(petUnit)
-            end
+            if UnitExists(petUnit) then self:ScanUnit(petUnit, UnitName(petUnit)) end
         end
     elseif numParty > 0 then
-        local _, pClass = UnitClass("player")
-        ProcessUnit("player", UnitName("player"), pClass)
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Paladin" then foundPaladins[UnitName("player")] = true end
         
-        if UnitExists("pet") then ProcessPet("pet") end
+        if UnitExists("pet") then self:ScanUnit("pet", UnitName("pet")) end
         
         for i = 1, numParty do
             local name = UnitName("party"..i)
             local _, class = UnitClass("party"..i)
-            ProcessUnit("party"..i, name, class)
+            self:ScanUnit("party"..i, name)
+            if class == "PALADIN" then foundPaladins[name] = true end
             
             local petUnit = "partypet"..i
-            if UnitExists(petUnit) then ProcessPet(petUnit) end
+            if UnitExists(petUnit) then self:ScanUnit(petUnit, UnitName(petUnit)) end
         end
     else
-        local _, pClass = UnitClass("player")
-        ProcessUnit("player", UnitName("player"), pClass)
-        if UnitExists("pet") then ProcessPet("pet") end
+        self:ScanUnit("player", UnitName("player"))
+        if UnitClass("player") == "Paladin" then foundPaladins[UnitName("player")] = true end
+        if UnitExists("pet") then self:ScanUnit("pet", UnitName("pet")) end
     end
     
     for name, _ in pairs(self.AllPaladins) do
@@ -687,6 +665,38 @@ function Paladin:ScanRaid()
             self.JudgementAssignments[name] = nil
         end
     end
+    
+    self.ScanIndex = 1
+end
+
+function Paladin:ScanStep()
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    local count = 0
+    if numRaid > 0 then
+        while count < self.ScanStepSize do
+            if self.ScanIndex > numRaid then self.ScanIndex = 1 end
+            local name = GetRaidRosterInfo(self.ScanIndex)
+            if name then
+                self:ScanUnit("raid"..self.ScanIndex, name)
+                count = count + 1
+            end
+            self.ScanIndex = self.ScanIndex + 1
+            if self.ScanIndex > numRaid then break end
+        end
+    elseif numParty > 0 then
+        if self.ScanIndex > (numParty + 1) then self.ScanIndex = 1 end
+        if self.ScanIndex == 1 then
+            self:ScanUnit("player", UnitName("player"))
+        else
+            local idx = self.ScanIndex - 1
+            self:ScanUnit("party"..idx, UnitName("party"..idx))
+        end
+        self.ScanIndex = self.ScanIndex + 1
+    end
+    
+    self.UIDirty = true
 end
 
 function Paladin:GetClassID(class)
