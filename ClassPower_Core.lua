@@ -878,6 +878,136 @@ function CP_ShowSettingsPanel()
 end
 
 -----------------------------------------------------------------------------------
+-- Admin Window
+-----------------------------------------------------------------------------------
+
+
+function ClassPower:ShowAdminWindow()
+    if not self.AdminWindow then
+        self:CreateAdminWindow()
+    end
+    self.AdminWindow:Show()
+end
+
+
+
+function ClassPower:CreateAdminWindow()
+    if self.AdminWindow then return end
+    
+    local f = CreateFrame("Frame", "ClassPowerAdminWindow", UIParent)
+    f:SetWidth(280)
+    f:SetHeight(140)
+    f:SetPoint("CENTER", 0, 100)
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 }
+    })
+    f:SetFrameStrata("HIGH")
+    f:SetToplevel(true)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -20)
+    title:SetText("ClassPower Admin")
+    
+    local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetText("Select a class module to configure")
+    
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+    
+    f:SetScript("OnMouseDown", function()
+        if arg1 == "LeftButton" then this:StartMoving() end
+    end)
+    f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
+    
+    -- Class buttons
+    local classes = {
+        {token = "PRIEST", label = "Priests", icon = "Interface\\Icons\\Spell_Holy_WordFortitude", implemented = true},
+        {token = "DRUID", label = "Druids", icon = "Interface\\Icons\\Spell_Nature_Regeneration", implemented = true},
+        {token = "PALADIN", label = "Paladins", icon = "Interface\\Icons\\Spell_Holy_SealOfWisdom", implemented = true},
+        {token = "MAGE", label = "Mages", icon = "Interface\\Icons\\Spell_Frost_IceStorm", implemented = false},
+        {token = "SHAMAN", label = "Shamans", icon = "Interface\\Icons\\Spell_Nature_BloodLust", implemented = false},
+    }
+    
+    local buttonWidth = 70
+    local buttonHeight = 50
+    local startX = 20
+    
+    -- Resize window to fit all buttons
+    f:SetWidth(20 + (table.getn(classes) * (buttonWidth + 10)))
+    
+    for i, class in ipairs(classes) do
+        local btn = CreateFrame("Button", f:GetName()..class.token, f)
+        btn:SetWidth(buttonWidth)
+        btn:SetHeight(buttonHeight)
+        btn:SetPoint("TOPLEFT", f, "TOPLEFT", startX + (i-1) * (buttonWidth + 10), -60)
+        
+        -- Background
+        local bg = btn:CreateTexture(btn:GetName().."Bg", "BACKGROUND")
+        bg:SetAllPoints(btn)
+        bg:SetTexture(0.1, 0.1, 0.1, 0.7)
+        
+        -- Icon
+        local icon = btn:CreateTexture(btn:GetName().."Icon", "ARTWORK")
+        icon:SetWidth(32)
+        icon:SetHeight(32)
+        icon:SetPoint("TOP", btn, "TOP", 0, -4)
+        icon:SetTexture(class.icon)
+        
+        -- Dim unimplemented modules
+        if not class.implemented then
+            icon:SetDesaturated(1)
+            icon:SetAlpha(0.5)
+        end
+        
+        -- Label
+        local label = btn:CreateFontString(btn:GetName().."Label", "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 4)
+        label:SetText(class.label)
+        if not class.implemented then
+            label:SetTextColor(0.5, 0.5, 0.5)
+        end
+        
+        -- Highlight
+        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+        local ht = btn:GetHighlightTexture()
+        if ht then ht:SetBlendMode("ADD") end
+        
+        btn.classToken = class.token
+        btn.classLabel = class.label
+        btn.implemented = class.implemented
+        btn:SetScript("OnClick", function()
+            if this.implemented then
+                ClassPower:SwitchViewModule(this.classToken)
+            else
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..this.classLabel.." module not yet implemented.")
+            end
+        end)
+        
+        btn:SetScript("OnEnter", function()
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            if this.implemented then
+                GameTooltip:SetText("Open "..this.classLabel.." Configuration")
+            else
+                GameTooltip:SetText(this.classLabel.." (Not Implemented)")
+                GameTooltip:AddLine("This class module is not yet available.", 1, 0.5, 0)
+            end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    
+    f:Hide()
+    self.AdminWindow = f
+end
+
+-----------------------------------------------------------------------------------
 -- Auto-Assign Helper Functions
 -----------------------------------------------------------------------------------
 
@@ -935,6 +1065,70 @@ function ClassPower_DistributeGroups(players, groups)
     end
     
     return assignments
+end
+
+
+-----------------------------------------------------------------------------------
+-- Slash Command Handler
+-----------------------------------------------------------------------------------
+
+
+
+SlashCmdList["CLASSPOWER"] = function(msg)
+    local _, _, cmd, arg = string.find(msg, "^%s*(%S+)%s*(.*)$")
+    if not cmd then cmd = msg end
+    if not cmd or cmd == "" then
+        -- Default: Open current class config
+        if ClassPower.activeModule and ClassPower.activeModule.ShowConfig then
+            ClassPower.activeModule:ShowConfig()
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No active module loaded.")
+        end
+        return
+    end
+    
+    cmd = string.lower(cmd)
+    
+    if cmd == "admin" then
+        ClassPower:ShowAdminWindow()
+        
+    elseif cmd == "config" or cmd == "options" or cmd == "menu" then
+        if ClassPower.activeModule and ClassPower.activeModule.ShowConfig then
+            ClassPower.activeModule:ShowConfig()
+        end
+        
+    elseif cmd == "debug" then
+        if CP_PerUser.Debug then
+            CP_PerUser.Debug = false
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode disabled.")
+        else
+            CP_PerUser.Debug = true
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode enabled.")
+        end
+        
+    elseif cmd == "reset" then
+        if ClassPower.activeModule and ClassPower.activeModule.ResetUI then
+            ClassPower.activeModule:ResetUI()
+        end
+        
+    elseif cmd == "scale" then
+        local scale = tonumber(arg)
+        if scale and scale >= 0.5 and scale <= 2.0 then
+            if ClassPower.activeModule and ClassPower.activeModule.SetConfigScale then
+                ClassPower.activeModule:SetConfigScale(scale)
+            end
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Usage: /cp scale <0.5-2.0>")
+        end
+        
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Usage:")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp - Open config")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp admin - Open admin window")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp debug - Toggle debug")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp reset - Reset UI positions")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp scale <n> - Set config scale")
+    end
 end
 
 CP_Debug("ClassPower Core loaded.")

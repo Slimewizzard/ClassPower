@@ -831,20 +831,45 @@ function Paladin:AutoAssign()
     
     -- Find a free Paladin with the blessing
     local function findPaladinWithBlessing(blessingID, preferImproved)
-        local fallback = nil
+        -- First pass: Look for unused paladins
         for _, pdata in ipairs(paladins) do
             if pdata.blessings[blessingID] and not usedPaladins[pdata.name] then
                 if preferImproved and pdata.hasImprovedBlessings then
                     return pdata
                 end
-                if not fallback then
-                    fallback = pdata
-                end
+                return pdata -- Return first unused match
             end
         end
-        return fallback
+        
+        -- Second pass: Reuse paladins
+        for _, pdata in ipairs(paladins) do
+            if pdata.blessings[blessingID] then
+                return pdata
+            end
+        end
+        return nil
     end
     
+    -- Check tank status for each class
+    local classSkipsSalvation = {}
+    for classID = 0, 9 do
+        local members = self.CurrentBuffsByClass[classID]
+        if members and table.getn(members) > 0 then
+            local allTanks = true
+            for _, info in ipairs(members) do
+                if not self:IsTank(info.name) then
+                    allTanks = false
+                    break
+                end
+            end
+            if allTanks then
+                classSkipsSalvation[classID] = true
+            end
+        end
+    end
+    
+    local classesSatisfied = {}
+
     -- Assign blessings in priority order
     for _, bID in ipairs(priorityOrder) do
         -- Special handling for Might/Wisdom overlap on hybrids
@@ -857,10 +882,21 @@ function Paladin:AutoAssign()
             
             -- Assign this blessing to all classes that need it
             for classID = 0, 9 do
-                if classesPresent[classID] then
+                if classesPresent[classID] and not classesSatisfied[classID] then
                     local needs = self.ClassBlessingNeeds[classID]
-                    if needs and needs[bID] then
+                    -- Skip Salvation if class is all tanks
+                    local skipSalvation = (bID == 2 and classSkipsSalvation[classID])
+                    
+                    -- For Paladin Tanks (ID 4), prefer Sanctuary(5) over Might(1)/Wisdom(0)/Light(3)
+                    -- Kings(4) is still preferred as it is higher priority than 1/0/3/5.
+                    local skipForTank = false
+                    if classID == 4 and classSkipsSalvation[classID] and (bID == 1 or bID == 0 or bID == 3) then
+                        skipForTank = true
+                    end
+                    
+                    if needs and needs[bID] and not skipSalvation and not skipForTank then
                         self.Assignments[paladin.name][classID] = bID
+                        classesSatisfied[classID] = true
                     end
                 end
             end
