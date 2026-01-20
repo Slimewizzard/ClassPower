@@ -10,9 +10,6 @@ ClassPower.version = "2.0"
 
 -- Saved Variables (Renamed from PriestPower)
 CP_PerUser = CP_PerUser or {}
-ClassPower_Assignments = ClassPower_Assignments or {}
-ClassPower_Assignments = ClassPower_Assignments or {}
-ClassPower_LegacyAssignments = ClassPower_LegacyAssignments or {}
 ClassPower_TankList = ClassPower_TankList or {} -- List of {name="Name", role="MT", mark=1}
 
 -- Global reference
@@ -362,6 +359,10 @@ function ClassPower_OnEvent(event)
         
     elseif event == "CHAT_MSG_ADDON" then
         if arg1 == CP_PREFIX then
+            if string.find(arg2, "^TANKSYNC") then
+                ClassPower:OnTankSync(arg2)
+            end
+            
             -- Route to ALL loaded modules (for cross-class admin feature)
             for classToken, loaded in pairs(ClassPower.loadedModules) do
                 if loaded then
@@ -984,9 +985,10 @@ function ClassPower:AddTank(name, role, mark)
     end
     -- Reset Paladin assignments on tank change as priorities change
     if ClassPower.modules["PALADIN"] then
-        ClassPower.modules["PALADIN"].Assignments = {} -- Optional: clear assignments to force refresh
         ClassPower_SendMessage("TANKUPDATE") -- Notify modules
     end
+    
+    self:SendTankSync()
 end
 
 function ClassPower:RemoveTank(name)
@@ -997,6 +999,7 @@ function ClassPower:RemoveTank(name)
                 self:UpdateTankListUI()
             end
             ClassPower_SendMessage("TANKUPDATE")
+            self:SendTankSync()
             return
         end
     end
@@ -1166,6 +1169,7 @@ function ClassPower:CreateTankManagerWindow()
             if t then
                 t.mark = mark
                 ClassPower:UpdateTankListUI()
+                ClassPower:SendTankSync()
             end
             CloseDropDownMenus()
         end
@@ -1182,6 +1186,7 @@ function ClassPower:CreateTankManagerWindow()
                 if t then
                     t.mark = mark
                     ClassPower:UpdateTankListUI()
+                    ClassPower:SendTankSync()
                 end
                 CloseDropDownMenus()
             end
@@ -1238,6 +1243,7 @@ function ClassPower:CreateTankManagerWindow()
                 tank.role = (tank.role == "MT") and "OT" or "MT"
                 this:SetText(tank.role)
                 ClassPower:UpdateTankListUI()
+                ClassPower:SendTankSync()
             end
         end)
         
@@ -1384,6 +1390,50 @@ function ClassPower_SlashHandler(msg)
     end
 end
 SlashCmdList["CLASSPOWER"] = ClassPower_SlashHandler
+
+-----------------------------------------------------------------------------------
+-- Tank Sync
+-----------------------------------------------------------------------------------
+
+function ClassPower:SendTankSync()
+    local msg = "TANKSYNC"
+    for _, tank in ipairs(ClassPower_TankList) do
+        msg = msg .. " " .. tank.name .. "," .. (tank.role or "MT") .. "," .. (tank.mark or 0)
+    end
+    ClassPower_SendMessage(msg)
+end
+
+function ClassPower:OnTankSync(msg)
+    local newList = {}
+    -- Skip "TANKSYNC" prefix
+    for part in string.gfind(msg, "[^ ]+") do
+        if part ~= "TANKSYNC" then
+            local _, _, name, role, mark = string.find(part, "([^,]+),([^,]+),([^,]+)")
+            if name then
+                table.insert(newList, {name = name, role = role, mark = tonumber(mark) or 0})
+            end
+        end
+    end
+    
+    -- Clear and repopulate instead of reassigning (preserves references)
+    for i = table.getn(ClassPower_TankList), 1, -1 do
+        table.remove(ClassPower_TankList, i)
+    end
+    for _, t in ipairs(newList) do
+        table.insert(ClassPower_TankList, t)
+    end
+    
+    -- Refresh all module UIs
+    for _, mod in pairs(self.modules) do
+        if mod.UpdateUI then mod:UpdateUI() end
+        if mod.UpdateConfigGrid then mod:UpdateConfigGrid() end
+    end
+    
+    -- Refresh Tank Manager if visible
+    if self.TankManagerWindow and self.TankManagerWindow:IsVisible() then
+        self:UpdateTankListUI()
+    end
+end
 
 CP_Debug("ClassPower Core loaded.")
 

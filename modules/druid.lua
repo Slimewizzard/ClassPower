@@ -783,13 +783,13 @@ function Druid:AutoAssign()
 end
 
 function Druid:SyncThornsWithTanks()
-    if not ClassPower.TankList then return end
+    if not ClassPower_TankList then return end
     
     local pname = UnitName("player")
     if not self.ThornsList[pname] then self.ThornsList[pname] = {} end
     
     local count = 0
-    for _, tank in ipairs(ClassPower.TankList) do
+    for _, tank in ipairs(ClassPower_TankList) do
         -- Check if already in list
         local found = false
         for _, tName in ipairs(self.ThornsList[pname]) do
@@ -943,10 +943,10 @@ function Druid:OnAddonMessage(sender, msg)
             end
         end
     elseif string.find(msg, "^DTHORNS ") then
-        local _, _, cmd, target, param = string.find(msg, "^DTHORNS (.*) (.*) (.*)")
+        local _, _, cmd, target, param = string.find(msg, "^DTHORNS ([^ ]+) ([^ ]+) (.*)")
         -- Try 2-arg match if 3-arg failed (e.g. CLEAR)
         if not cmd then 
-             _, _, cmd, target = string.find(msg, "^DTHORNS (.*) (.*)")
+             _, _, cmd, target = string.find(msg, "^DTHORNS ([^ ]+) (.*)")
         end
         
         if cmd and target then
@@ -2398,7 +2398,7 @@ function Druid:TargetDropDown_Initialize(level)
             end
             
             -- Add Tanks from TankList Option
-            if ClassPower.TankList and table.getn(ClassPower.TankList) > 0 then
+            if ClassPower_TankList and table.getn(ClassPower_TankList) > 0 then
                 info = {}
                 info.text = "|cff00ff00+ Add All Tanks|r"
                 info.value = "ADDTANKS"
@@ -2471,9 +2471,9 @@ function Druid:AssignTarget_OnClick()
     if mode == "Thorns" then
         -- Handle Thorns list
         if targetName == "ADDTANKS" then
-            if ClassPower.TankList then
+            if ClassPower_TankList then
                 local count = 0
-                for _, tank in ipairs(ClassPower.TankList) do
+                for _, tank in ipairs(ClassPower_TankList) do
                     -- Check if not already in list to avoid spamming "Added" messages locally if possible
                     -- But AddToThornsList handles duplicates gracefully (prints message though)
                     self:AddToThornsList(pname, tank.name)
@@ -2482,6 +2482,7 @@ function Druid:AssignTarget_OnClick()
                 end
                 if count > 0 then
                      DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added all tanks to " .. pname .. "'s Thorns list.")
+                     self:UpdateUI()
                 end
             end
         elseif targetName == "CLEAR" then
