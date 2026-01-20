@@ -1,6 +1,6 @@
 # ClassPower
 
-A comprehensive buff management addon for World of Warcraft 1.12.1 (Turtle WoW). Inspired by the classic PallyPower, ClassPower simplifies raid-wide buff management for **Priests**, **Druids**, and **Paladins**.
+A comprehensive buff management addon for World of Warcraft 1.12.1. ClassPower simplifies raid-wide buff management for **Priests**, **Druids**, and **Paladins**.
 
 ## Features at a Glance
 
@@ -25,6 +25,8 @@ Manage group-wide buffs and Turtle WoW's Champion system:
 | **Champion** | Proclaim, Grace, Empower, Revive Champion |
 | **Enlighten** | Turtle WoW spell |
 
+<img width="684" height="560" alt="PriestModule" src="https://github.com/user-attachments/assets/41dd97ce-fb4d-4f33-94bb-d9432f01639e" />
+
 ### Druid Module
 Manage Mark of the Wild, Thorns assignments, and utility spells:
 
@@ -34,6 +36,8 @@ Manage Mark of the Wild, Thorns assignments, and utility spells:
 | **Thorns** | Customizable target list with priority system |
 | **Emerald Blessing** | Turtle WoW spell |
 | **Innervate** | Assign a target with mana threshold alerts |
+
+<img width="722" height="186" alt="DruidModule" src="https://github.com/user-attachments/assets/4bfd6bab-3edf-41df-b9d8-0f3651e5f501" />
 
 ### Paladin Module
 Class-based Greater Blessings, Auras, and Judgements:
@@ -46,6 +50,8 @@ Class-based Greater Blessings, Auras, and Judgements:
 | **Smart Buffs** | Won't suggest Wisdom for Warriors/Rogues, or Might for casters |
 | **Symbol Tracking** | Shows Symbol of Kings reagent count |
 
+<img width="1013" height="223" alt="PallyModule" src="https://github.com/user-attachments/assets/cb08f6d1-cde0-4c47-8c0f-1b42a80b218c" />
+
 ---
 
 ## Admin Module
@@ -55,6 +61,8 @@ The **Admin Window** allows **Raid Leaders** and **Raid Assistants** to view and
 ### Opening the Admin Window
 - **Command**: `/cpwr admin`
 - **Minimap Button**: Shift + Left-click the ClassPower minimap button
+
+<img width="461" height="180" alt="adminpanel" src="https://github.com/user-attachments/assets/e7351a77-55ac-434a-87f8-8a8e80e0495d" />
 
 ### Admin Window Features
 
