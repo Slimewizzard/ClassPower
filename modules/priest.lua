@@ -309,6 +309,18 @@ function Priest:OnSlashCommand(msg)
     end
 end
 
+-- Show config window (called by admin panel)
+function Priest:ShowConfig()
+    if not self.ConfigWindow then
+        self:CreateConfigWindow()
+    end
+    -- Request fresh sync and scan when opened via admin
+    self:ScanRaid()
+    self:RequestSync()
+    self.ConfigWindow:Show()
+    self:UpdateConfigGrid()
+end
+
 -----------------------------------------------------------------------------------
 -- Spell Scanning
 -----------------------------------------------------------------------------------
