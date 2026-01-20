@@ -54,29 +54,29 @@ Icons disappear once everyone in your assigned group/class has the buff.
 ## Commands
 
 ### General
-- `/cp` or `/classpower`: Toggle the Configuration window for your class.
-- `/cp reset`: Reset UI position and scale to defaults.
-- `/cp debug`: Toggle debug logging.
+- `/cpwr` or `/classpower`: Toggle the Configuration window for your class.
+- `/cpwr reset`: Reset UI position and scale to defaults.
+- `/cpwr debug`: Toggle debug logging.
 
 ### Priest-specific
-- `/cp revive`: Cast Revive Champion on your assigned target.
-- `/cp checkbuffs`: Debug command to list buffs on current target.
+- `/cpwr revive`: Cast Revive Champion on your assigned target.
+- `/cpwr checkbuffs`: Debug command to list buffs on current target.
 
 ### Druid-specific
-- `/cp innervate`: Cast Innervate on your assigned target.
-- `/cp thorns`: Cast Thorns on the next person in your list missing it.
-- `/cp emerald`: Cast Emerald Blessing.
+- `/cpwr innervate`: Cast Innervate on your assigned target.
+- `/cpwr thorns`: Cast Thorns on the next person in your list missing it.
+- `/cpwr emerald`: Cast Emerald Blessing.
 
 ### Paladin-specific
-- `/cp report`: Report all paladin assignments to raid/party chat.
-- `/cp checkbuffs`: Debug command to list buffs on current target.
+- `/cpwr report`: Report all paladin assignments to raid/party chat.
+- `/cpwr checkbuffs`: Debug command to list buffs on current target.
 
 ### Legacy aliases
 - `/prip`, `/prp`, `/priestpower`: Work as before for Priest module.
 
 ## Configuration
 
-1. Use `/cp` to open the assignment grid for your class.
+1. Use `/cpwr` to open the assignment grid for your class.
 2. Click icons to toggle assignments:
    - **Priest**: Click individual buff icons, or Shift-click to toggle all 3.
    - **Druid**: Click MotW icons to assign groups, click Thorns to manage target list.

@@ -337,7 +337,7 @@ eventFrame:SetScript("OnUpdate", function() ClassPower_OnUpdate(arg1) end)
 
 -- Register slash commands
 SlashCmdList["CLASSPOWER"] = ClassPower_SlashHandler
-SLASH_CLASSPOWER1 = "/cp"
+SLASH_CLASSPOWER1 = "/cpwr"
 SLASH_CLASSPOWER2 = "/classpower"
 SLASH_CLASSPOWER3 = "/prip"
 SLASH_CLASSPOWER4 = "/prp"
