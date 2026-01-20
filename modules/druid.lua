@@ -228,15 +228,16 @@ function Druid:OnUpdate(elapsed)
     if self.UpdateTimer <= 0 then
         self.UpdateTimer = refreshInterval
         
-        -- Only scan and update if UI is visible
+        -- Only scan and update if UI exists (not just visible - need data to show content)
         local needsScan = false
-        if self.BuffBar and self.BuffBar:IsVisible() then
+        if self.BuffBar then
             needsScan = true
         end
         if self.ConfigWindow and self.ConfigWindow:IsVisible() then
             needsScan = true
         end
         
+
         if needsScan then
             self:ScanRaid()
             self:UpdateUI()
@@ -455,15 +456,29 @@ function Druid:ScanUnit(unit, name)
             b = b + 1
         end
         
-        -- If textures haven't changed, skip heavy scanning
+        -- If textures haven't changed AND we have cached buff info, skip heavy scanning
         if self.UnitTextureCache[name] == textureHash then
-            -- Update simple flags from current buff info if exists
             local prev = self.CurrentBuffsByName[name]
             if prev then
+                -- Update simple flags
                 prev.visible = UnitIsVisible(unit)
                 prev.dead = UnitIsDeadOrGhost(unit)
+                -- Add to CurrentBuffs (may have been cleared by ScanRaid)
+                self.CurrentBuffs[subgroup] = self.CurrentBuffs[subgroup] or {}
+                local found = false
+                for i, m in ipairs(self.CurrentBuffs[subgroup]) do
+                    if m.name == name then
+                        self.CurrentBuffs[subgroup][i] = prev
+                        found = true
+                        break
+                    end
+                end
+                if not found then
+                    table.insert(self.CurrentBuffs[subgroup], prev)
+                end
+                return  -- Only return early if we had cached data to use
             end
-            return 
+            -- If prev is nil, fall through to full scan below
         end
         self.UnitTextureCache[name] = textureHash
 
@@ -516,6 +531,7 @@ function Druid:ScanUnit(unit, name)
 
         -- Update the specific entry in CurrentBuffs
         self.CurrentBuffs[subgroup] = self.CurrentBuffs[subgroup] or {}
+        
         local found = false
         for i, m in ipairs(self.CurrentBuffs[subgroup]) do
             if m.name == name then
@@ -541,6 +557,7 @@ function Druid:ScanRaid()
     local numParty = GetNumPartyMembers()
     local foundDruids = {}
     
+
     if UnitClass("player") == "Druid" then
         foundDruids[UnitName("player")] = true
     end
@@ -1088,6 +1105,7 @@ end
 function Druid:CreateBuffBar()
     if getglobal("ClassPowerDruidBuffBar") then 
         self.BuffBar = getglobal("ClassPowerDruidBuffBar")
+        self.BuffBar:Show()  -- Ensure it's visible
         return 
     end
     
@@ -1160,6 +1178,7 @@ function Druid:CreateBuffBar()
         f:SetScale(0.7)
     end
     
+    f:Show()  -- Ensure BuffBar is visible
     self.BuffBar = f
 end
 
@@ -1184,6 +1203,7 @@ function Druid:CreateHUDRow(parent, name, id)
     if id <= 8 then
         local motw = CP_CreateHUDButton(f, name.."MotW")
         motw:SetPoint("LEFT", f, "LEFT", 40, 0)
+        getglobal(motw:GetName().."Icon"):SetTexture(self.BuffIcons[0])
         motw:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
     end
     
