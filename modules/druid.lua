@@ -1758,27 +1758,72 @@ function Druid:BuffButton_OnClick(btn)
     local pname = UnitName("player")
     
     if i == 9 then
-        -- Thorns - cast on first person in list missing it
+        -- Thorns
         local thornsList = self.ThornsList[pname]
         if thornsList then
+            local isRightClick = (arg1 == "RightButton")
+            local bestTarget = nil
+            local minTime = 999999
+
             for _, target in ipairs(thornsList) do
                 local status = self.CurrentBuffsByName[target]
-                if status and not status.hasThorns and not status.dead and status.visible then
-                    ClearTarget()
-                    TargetByName(target, true)
-                    if UnitName("target") == target then
-                        if CheckInteractDistance("target", 4) then
-                            CastSpellByName(self.Spells.THORNS)
-                            TargetLastTarget()
-                            self:ScanRaid()
-                            self:UpdateBuffBar()
-                            return
+                if status and status.visible and not status.dead then
+                    -- Check status
+                    local missing = not status.hasThorns
+                    
+                    if isRightClick then
+                        -- Right-click: Only target missing
+                        if missing then
+                            bestTarget = target
+                            break -- Found one, that's enough
+                        end
+                    else
+                        -- Left-click: Force refresh (smart priority)
+                        -- Prioritize missing (-1), then lowest duration
+                        local remaining = self:GetEstimatedTimeRemaining(target, "Thorns")
+                        if missing then remaining = -1 end
+                        if not remaining then remaining = 0 end -- Should have timestamp if hasThorns, but safety fallback
+                        
+                        if remaining < minTime then
+                            minTime = remaining
+                            bestTarget = target
                         end
                     end
-                    TargetLastTarget()
                 end
             end
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Thorns targets in range!")
+            
+            if bestTarget then
+                ClearTarget()
+                TargetByName(bestTarget, true)
+                if UnitName("target") == bestTarget then
+                    if CheckInteractDistance("target", 4) then
+                        CastSpellByName(self.Spells.THORNS)
+                        
+                        -- Optimistic timestamp update for forced refresh
+                        if self.BuffTimestamps[bestTarget] then
+                            self.BuffTimestamps[bestTarget].Thorns = GetTime()
+                        end
+
+                        TargetLastTarget()
+                        self:ScanRaid()
+                        self:UpdateBuffBar()
+                        return
+                    else
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: " .. bestTarget .. " is out of range!")
+                    end
+                else
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Could not target " .. bestTarget)
+                end
+                TargetLastTarget()
+            else
+                if isRightClick then
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: All Thorns targets are buffed!")
+                else
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Thorns targets need refresh!")
+                end
+            end
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Thorns targets assigned!")
         end
     elseif i == 10 then
         -- Emerald Blessing - just cast it (self-cast raid buff)
