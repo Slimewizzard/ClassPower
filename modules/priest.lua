@@ -992,11 +992,11 @@ function Priest:CreateHUDRow(parent, name, id)
         fort:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
         local spirit = CP_CreateHUDButton(f, name.."Spirit")
-        spirit:SetPoint("LEFT", fort, "RIGHT", 50, 0)
+        spirit:SetPoint("LEFT", fort, "RIGHT", 4, 0)
         spirit:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
         local shadow = CP_CreateHUDButton(f, name.."Shadow")
-        shadow:SetPoint("LEFT", spirit, "RIGHT", 50, 0)
+        shadow:SetPoint("LEFT", spirit, "RIGHT", 4, 0)
         shadow:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
     end
     
@@ -1007,17 +1007,17 @@ function Priest:CreateHUDRow(parent, name, id)
         proc:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
         local grace = CP_CreateHUDButton(f, name.."Grace")
-        grace:SetPoint("LEFT", proc, "RIGHT", 50, 0)
+        grace:SetPoint("LEFT", proc, "RIGHT", 4, 0)
         getglobal(grace:GetName().."Icon"):SetTexture(self.ChampionIcons["Grace"])
         grace:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
         local emp = CP_CreateHUDButton(f, name.."Empower")
-        emp:SetPoint("LEFT", grace, "RIGHT", 50, 0)
+        emp:SetPoint("LEFT", grace, "RIGHT", 4, 0)
         getglobal(emp:GetName().."Icon"):SetTexture(self.ChampionIcons["Empower"])
         emp:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
         local rev = CP_CreateHUDButton(f, name.."Revive")
-        rev:SetPoint("LEFT", emp, "RIGHT", 50, 0)
+        rev:SetPoint("LEFT", emp, "RIGHT", 4, 0)
         getglobal(rev:GetName().."Icon"):SetTexture(self.ChampionIcons["Revive"])
         rev:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
     end
@@ -1055,17 +1055,20 @@ function Priest:UpdateBuffBar()
     local displayMode = CP_PerUser.BuffDisplayMode or "missing"
     local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
     
-    local ROW_BASE_X = {40, 108, 176, 244} -- X positions for buttons 1, 2, 3, 4
+    local BUTTON_SIZE = 30  -- Button width/height
+    local COLUMN_WIDTH = 85 -- Fixed column width (button + text space for longest format)
+    local LABEL_WIDTH = 35  -- Width reserved for "Grp X" label
     
     for i = 1, 10 do
         local row = getglobal("ClassPowerHUDRow"..i)
         if not row then break end
         
         local showRow = false
-        local currentRowWidth = 0
+        local columnIndex = 0  -- Track which column we're on
+        local maxColumns = 0   -- Track highest column used
         
-        -- Helper to check buttons
-        local function CheckButton(btn, idx, missingCount, totalCount, minTime, label)
+        -- Helper to check and position buttons at fixed columns
+        local function CheckButton(btn, missingCount, totalCount, minTime, label)
             if not btn then return false end
             
             local shouldShow = false
@@ -1083,6 +1086,11 @@ function Priest:UpdateBuffBar()
             
             if shouldShow then
                 btn:Show()
+                btn:ClearAllPoints()
+                -- Position at fixed column
+                local xPos = LABEL_WIDTH + 5 + (columnIndex * COLUMN_WIDTH)
+                btn:SetPoint("LEFT", row, "LEFT", xPos, 0)
+                
                 local txt = getglobal(btn:GetName().."Text")
                 local icon = getglobal(btn:GetName().."Icon")
                 
@@ -1095,7 +1103,7 @@ function Priest:UpdateBuffBar()
                         if minTime and minTime > 0 then
                             txt:SetText(missingCount.." ("..CP_FormatTime(minTime)..")")
                         else
-                             txt:SetText(missingCount.."/"..totalCount) -- Shortened for space
+                             txt:SetText(missingCount.."/"..totalCount)
                         end
                         txt:SetTextColor(1, 0, 0)
                     else
@@ -1107,8 +1115,8 @@ function Priest:UpdateBuffBar()
                     txt:SetTextColor(1, 0, 0)
                 end
                 
-                local btnWidth = ROW_BASE_X[idx] + 25 + txt:GetStringWidth()
-                if btnWidth > currentRowWidth then currentRowWidth = btnWidth end
+                columnIndex = columnIndex + 1
+                if columnIndex > maxColumns then maxColumns = columnIndex end
                 return true
             else
                 btn:Hide()
@@ -1122,36 +1130,36 @@ function Priest:UpdateBuffBar()
             if target then
                 local status = self.CurrentBuffsByName[target]
                 
-                -- Dead check
                 local isDead = (status and status.dead)
                 local btnR = getglobal(row:GetName().."Revive")
                 if isDead then
                      btnR:Show()
+                     btnR:ClearAllPoints()
+                     btnR:SetPoint("LEFT", row, "LEFT", currentX, 0)
                      btnR.tooltipText = "Champion: "..target.." (DEAD)"
-                     currentRowWidth = ROW_BASE_X[4] + 25
+                     currentX = currentX + BUTTON_SIZE + 30 + BUTTON_GAP
                      showRow = true
                 else
                      btnR:Hide()
                      
-                     -- Proclaim (Btn 1)
                      local hasProclaim = status and status.hasProclaim
                      local timeProclaim = self:GetEstimatedTimeRemaining(target, "Proclaim")
                      local btnP = getglobal(row:GetName().."Proclaim")
-                     local showP = CheckButton(btnP, 1, hasProclaim and 0 or 1, 1, timeProclaim, "Proclaim")
+                     local showP = CheckButton(btnP, hasProclaim and 0 or 1, 1, timeProclaim, "Proclaim")
                      if showP then btnP.tooltipText = "Proclaim: "..target end
                      
-                     -- Grace (Btn 2)
+                     -- Grace
                      local hasGrace = status and status.hasGrace
                      local timeGrace = self:GetEstimatedTimeRemaining(target, "Grace")
                      local btnG = getglobal(row:GetName().."Grace")
-                     local showG = CheckButton(btnG, 2, hasGrace and 0 or 1, 1, timeGrace, "Grace")
+                     local showG = CheckButton(btnG, hasGrace and 0 or 1, 1, timeGrace, "Grace")
                      if showG then btnG.tooltipText = "Grace: "..target end
                      
-                     -- Empower (Btn 3)
+                     -- Empower
                      local hasEmpower = status and status.hasEmpower
                      local timeEmpower = self:GetEstimatedTimeRemaining(target, "Empower")
                      local btnE = getglobal(row:GetName().."Empower")
-                     local showE = CheckButton(btnE, 3, hasEmpower and 0 or 1, 1, timeEmpower, "Empower")
+                     local showE = CheckButton(btnE, hasEmpower and 0 or 1, 1, timeEmpower, "Empower")
                      if showE then btnE.tooltipText = "Empower: "..target end
                      
                      showRow = showP or showG or showE
@@ -1167,7 +1175,7 @@ function Priest:UpdateBuffBar()
                 local timeEnlighten = self:GetEstimatedTimeRemaining(target, "Enlighten")
                 local btnEn = getglobal(row:GetName().."Enlighten")
                 
-                showRow = CheckButton(btnEn, 1, hasEnlighten and 0 or 1, 1, timeEnlighten, "Enlighten")
+                showRow = CheckButton(btnEn, hasEnlighten and 0 or 1, 1, timeEnlighten, "Enlighten")
                 if showRow then btnEn.tooltipText = "Enlighten: "..target end
             end
             
@@ -1191,11 +1199,11 @@ function Priest:UpdateBuffBar()
                  return missing, total, minTime
             end
             
-            -- Fort (Btn 1)
+            -- Fort
             if fS > 0 then
                 local missing, total, minTime = GetStats("hasFort", "Fortitude")
                 local btn = getglobal(row:GetName().."Fort")
-                if CheckButton(btn, 1, missing, total, minTime, "Fortitude") then
+                if CheckButton(btn, missing, total, minTime, "Fortitude") then
                     showRow = true
                     btn.tooltipText = "Group "..i..": Fortitude"
                     local icon = getglobal(btn:GetName().."Icon")
@@ -1205,11 +1213,11 @@ function Priest:UpdateBuffBar()
                 getglobal(row:GetName().."Fort"):Hide()
             end
             
-            -- Spirit (Btn 2)
+            -- Spirit
             if sS > 0 then
                 local missing, total, minTime = GetStats("hasSpirit", "Spirit")
                 local btn = getglobal(row:GetName().."Spirit")
-                if CheckButton(btn, 2, missing, total, minTime, "Spirit") then
+                if CheckButton(btn, missing, total, minTime, "Spirit") then
                     showRow = true
                     btn.tooltipText = "Group "..i..": Spirit"
                     local icon = getglobal(btn:GetName().."Icon")
@@ -1219,11 +1227,11 @@ function Priest:UpdateBuffBar()
                  getglobal(row:GetName().."Spirit"):Hide()
             end
             
-            -- Shadow (Btn 3)
+            -- Shadow
             if shS > 0 then
                 local missing, total, minTime = GetStats("hasShadow", "Shadow")
                 local btn = getglobal(row:GetName().."Shadow")
-                if CheckButton(btn, 3, missing, total, minTime, "Shadow") then
+                if CheckButton(btn, missing, total, minTime, "Shadow") then
                     showRow = true
                     btn.tooltipText = "Group "..i..": Shadow"
                     local icon = getglobal(btn:GetName().."Icon")
@@ -1243,7 +1251,8 @@ function Priest:UpdateBuffBar()
                 row:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -20)
             end
             lastRow = row
-            if currentRowWidth > maxRowWidth then maxRowWidth = currentRowWidth end
+            local rowWidth = LABEL_WIDTH + 5 + (maxColumns * COLUMN_WIDTH)
+            if rowWidth > maxRowWidth then maxRowWidth = rowWidth end
         else
             row:Hide()
         end
