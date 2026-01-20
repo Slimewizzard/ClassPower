@@ -1271,6 +1271,17 @@ function Priest:CreateConfigWindow()
         GameTooltip:Hide()
     end)
     
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(24)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("PRIEST")
+    end)
+    closeModBtn:Hide()
+
     -- Update visibility based on promotion status
     f:SetScript("OnShow", function()
         local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
@@ -1279,6 +1290,16 @@ function Priest:CreateConfigWindow()
                 autoAssignBtn:Show()
             else
                 autoAssignBtn:Hide()
+            end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Priest" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
             end
         end
     end)

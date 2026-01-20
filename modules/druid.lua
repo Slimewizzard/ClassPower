@@ -768,9 +768,41 @@ function Druid:AutoAssign()
     end
     DEFAULT_CHAT_FRAME:AddMessage(msg)
     
+    -- Sync Thorns from Tank List (for current player)
+    self:SyncThornsWithTanks()
+    
     -- Update UI
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
+end
+
+function Druid:SyncThornsWithTanks()
+    if not ClassPower.TankList then return end
+    
+    local pname = UnitName("player")
+    if not self.ThornsList[pname] then self.ThornsList[pname] = {} end
+    
+    local count = 0
+    for _, tank in ipairs(ClassPower.TankList) do
+        -- Check if already in list
+        local found = false
+        for _, tName in ipairs(self.ThornsList[pname]) do
+            if tName == tank.name then 
+                found = true 
+                break 
+            end
+        end
+        
+        if not found then
+            table.insert(self.ThornsList[pname], tank.name)
+            count = count + 1
+        end
+    end
+    
+    if count > 0 then
+        self:SaveThornsList()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added "..count.." tanks to your Thorns list.")
+    end
 end
 
 -----------------------------------------------------------------------------------
@@ -1472,6 +1504,17 @@ function Druid:CreateConfigWindow()
         GameTooltip:Hide()
     end)
     
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(22)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("DRUID")
+    end)
+    closeModBtn:Hide()
+
     -- Update visibility based on promotion status
     f:SetScript("OnShow", function()
         local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
@@ -1480,6 +1523,16 @@ function Druid:CreateConfigWindow()
                 autoAssignBtn:Show()
             else
                 autoAssignBtn:Hide()
+            end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Druid" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
             end
         end
     end)

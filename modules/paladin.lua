@@ -150,7 +150,7 @@ Paladin.JudgementAssignments = {} -- { [paladinName] = judgementID }
 Paladin.BuffTimestamps = {}       -- { [playerName] = { [blessingID] = { startTime=X, isGreater=bool } } }
 Paladin.RankInfo = {}
 Paladin.SymbolCount = 0           -- Symbol of Kings count
-Paladin.TankList = {}             -- { "TankName1", "TankName2", ... } - tanks skip Salvation
+
 
 -- Estimated durations
 Paladin.BuffDurations = {
@@ -232,14 +232,7 @@ function Paladin:OnLoad()
     end
     UIDropDownMenu_Initialize(ClassPowerPaladinJudgeDropDown, function(level) Paladin:JudgeDropDown_Initialize(level) end, "MENU")
     
-    -- Tank List dropdown
-    if not getglobal("ClassPowerPaladinTankDropDown") then
-        CreateFrame("Frame", "ClassPowerPaladinTankDropDown", UIParent, "UIDropDownMenuTemplate")
-    end
-    UIDropDownMenu_Initialize(ClassPowerPaladinTankDropDown, function(level) Paladin:TankDropDown_Initialize(level) end, "MENU")
-    
-    -- Load saved tank list
-    self:LoadTankList()
+
     
     -- Request sync from other paladins
     self:RequestSync()
@@ -710,47 +703,7 @@ end
 -----------------------------------------------------------------------------------
 
 function Paladin:IsTank(playerName)
-    for _, tank in ipairs(self.TankList) do
-        if tank == playerName then
-            return true
-        end
-    end
-    return false
-end
-
-function Paladin:AddToTankList(playerName)
-    if not self:IsTank(playerName) then
-        table.insert(self.TankList, playerName)
-        self:SaveTankList()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added "..playerName.." to Tank List")
-    end
-end
-
-function Paladin:RemoveFromTankList(playerName)
-    for i, tank in ipairs(self.TankList) do
-        if tank == playerName then
-            table.remove(self.TankList, i)
-            self:SaveTankList()
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Removed "..playerName.." from Tank List")
-            return
-        end
-    end
-end
-
-function Paladin:ClearTankList()
-    self.TankList = {}
-    self:SaveTankList()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Tank List cleared")
-end
-
-function Paladin:SaveTankList()
-    CP_PerUser.PaladinTankList = self.TankList
-end
-
-function Paladin:LoadTankList()
-    if CP_PerUser.PaladinTankList then
-        self.TankList = CP_PerUser.PaladinTankList
-    end
+    return ClassPower:IsTank(playerName)
 end
 
 -----------------------------------------------------------------------------------
@@ -778,8 +731,7 @@ function Paladin:AutoAssign()
         return
     end
     
-    -- Load tank list
-    self:LoadTankList()
+
     
     -- Get list of classes present in raid
     local classesPresent = {}
@@ -1658,38 +1610,38 @@ function Paladin:CreateConfigWindow()
         GameTooltip:Hide()
     end)
     
-    -- Tank List button
-    local tankBtn = CreateFrame("Button", f:GetName().."TankListBtn", f, "UIPanelButtonTemplate")
-    tankBtn:SetWidth(80)
-    tankBtn:SetHeight(24)
-    tankBtn:SetPoint("LEFT", autoBtn, "RIGHT", 10, 0)
-    tankBtn:SetText("Tank List")
-    tankBtn:SetScript("OnClick", function()
-        ToggleDropDownMenu(1, nil, ClassPowerPaladinTankDropDown, this, 0, 0)
-    end)
-    tankBtn:SetScript("OnEnter", function()
-        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Tank List")
-        GameTooltip:AddLine("Players on this list will skip", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Salvation assignments.", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine(" ", 1, 1, 1)
-        GameTooltip:AddLine("Current: "..table.getn(Paladin.TankList).." tanks", 1, 0.82, 0)
-        GameTooltip:Show()
-    end)
-    tankBtn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
+
     
     -- Update visibility based on promotion status
+    -- Update visibility based on promotion status
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(24)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("PALADIN")
+    end)
+    closeModBtn:Hide()
+
     f:SetScript("OnShow", function()
+        -- Auto-Assign Visibility
         local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
-        local tankListBtn = getglobal(this:GetName().."TankListBtn")
         if ClassPower_IsPromoted() then
             if autoAssignBtn then autoAssignBtn:Show() end
-            if tankListBtn then tankListBtn:Show() end
         else
             if autoAssignBtn then autoAssignBtn:Hide() end
-            if tankListBtn then tankListBtn:Hide() end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Paladin" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
+            end
         end
     end)
     
@@ -2259,106 +2211,7 @@ function Paladin:JudgeDropDown_OnClick(judgeID)
     end
 end
 
-function Paladin:TankDropDown_Initialize(level)
-    local info = {}
-    
-    -- Header
-    info.text = "Tank List (Skip Salvation)"
-    info.isTitle = true
-    info.notCheckable = true
-    UIDropDownMenu_AddButton(info)
-    
-    -- Clear all option
-    info = {}
-    info.text = "|cffff6600Clear All Tanks|r"
-    info.notCheckable = true
-    info.func = function()
-        Paladin:ClearTankList()
-        CloseDropDownMenus()
-    end
-    UIDropDownMenu_AddButton(info)
-    
-    -- Separator
-    info = {}
-    info.text = ""
-    info.isTitle = true
-    info.notCheckable = true
-    UIDropDownMenu_AddButton(info)
-    
-    -- Current tanks (with remove option)
-    if table.getn(self.TankList) > 0 then
-        info = {}
-        info.text = "-- Current Tanks --"
-        info.isTitle = true
-        info.notCheckable = true
-        UIDropDownMenu_AddButton(info)
-        
-        for _, tankName in ipairs(self.TankList) do
-            info = {}
-            info.text = tankName .. " |cffff0000[Remove]|r"
-            info.value = tankName
-            info.notCheckable = true
-            info.func = function()
-                Paladin:RemoveFromTankList(this.value)
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
-        end
-        
-        -- Separator
-        info = {}
-        info.text = ""
-        info.isTitle = true
-        info.notCheckable = true
-        UIDropDownMenu_AddButton(info)
-    end
-    
-    -- Add raid members (Warriors, Druids, Paladins - potential tanks)
-    info = {}
-    info.text = "-- Add Tank --"
-    info.isTitle = true
-    info.notCheckable = true
-    UIDropDownMenu_AddButton(info)
-    
-    -- Get raid/party members
-    local numRaid = GetNumRaidMembers()
-    local numParty = GetNumPartyMembers()
-    
-    local function AddMember(name, class)
-        if not name then return end
-        -- Only show if not already a tank
-        if self:IsTank(name) then return end
-        
-        -- Show class-appropriate members (Warriors, Druids, Paladins are common tanks)
-        local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class] or {r=1, g=1, b=1}
-        local colorCode = string.format("|cff%02x%02x%02x", classColor.r*255, classColor.g*255, classColor.b*255)
-        
-        local memberInfo = {}
-        memberInfo.text = colorCode .. name .. "|r"
-        memberInfo.value = name
-        memberInfo.notCheckable = true
-        memberInfo.func = function()
-            Paladin:AddToTankList(this.value)
-            CloseDropDownMenus()
-        end
-        UIDropDownMenu_AddButton(memberInfo)
-    end
-    
-    if numRaid > 0 then
-        for i = 1, numRaid do
-            local name, _, _, _, _, class = GetRaidRosterInfo(i)
-            AddMember(name, class)
-        end
-    elseif numParty > 0 then
-        for i = 1, numParty do
-            local name = UnitName("party"..i)
-            local _, class = UnitClass("party"..i)
-            AddMember(name, class)
-        end
-        local _, pClass = UnitClass("player")
-        AddMember(UnitName("player"), pClass)
-    end
-end
+
 
 -----------------------------------------------------------------------------------
 -- Update UI
@@ -2504,14 +2357,11 @@ function Paladin:UpdateLeaderButtons()
     if not self.ConfigWindow then return end
     
     local autoBtn = getglobal(self.ConfigWindow:GetName().."AutoAssignBtn")
-    local tankBtn = getglobal(self.ConfigWindow:GetName().."TankListBtn")
     
     if ClassPower_IsPromoted() then
         if autoBtn then autoBtn:Show() end
-        if tankBtn then tankBtn:Show() end
     else
         if autoBtn then autoBtn:Hide() end
-        if tankBtn then tankBtn:Hide() end
     end
 end
 
