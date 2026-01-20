@@ -1056,7 +1056,10 @@ function Priest:UpdateBuffBar()
     local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
     
     local BUTTON_SIZE = 30  -- Button width/height
-    local COLUMN_WIDTH = 85 -- Fixed column width (button + text space for longest format)
+    -- Dynamic column width based on display mode:
+    -- "missing" mode uses short text like "0/5" -> narrower columns
+    -- "timer"/"always" modes use longer text like "3 (5:24)" -> wider columns
+    local COLUMN_WIDTH = (displayMode == "missing") and 55 or 85
     local LABEL_WIDTH = 35  -- Width reserved for "Grp X" label
     
     for i = 1, 10 do
