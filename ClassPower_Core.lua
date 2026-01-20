@@ -10,8 +10,10 @@ ClassPower.version = "2.0"
 
 -- Saved Variables (Renamed from PriestPower)
 CP_PerUser = CP_PerUser or {}
-ClassPower_Assignments = ClassPower_Assignments or {}
-ClassPower_LegacyAssignments = ClassPower_LegacyAssignments or {}
+ClassPower_TankList = ClassPower_TankList or {} -- List of {name="Name", role="MT", mark=1}
+
+-- Global reference
+ClassPower.TankList = ClassPower_TankList
 
 -- Configuration defaults
 local DEFAULT_CONFIG = {
@@ -116,18 +118,38 @@ function ClassPower:SwitchViewModule(classToken)
         end
     end
     
-    -- Hide admin window if open
-    if self.AdminWindow and self.AdminWindow:IsVisible() then
-        self.AdminWindow:Hide()
-    end
+    -- Hide admin window if open (DISABLED per user request)
+    -- if self.AdminWindow and self.AdminWindow:IsVisible() then
+    --     self.AdminWindow:Hide()
+    -- end
 end
 
--- Show the admin window (for leaders/assists)
 function ClassPower:ShowAdminWindow()
     if not self.AdminWindow then
         self:CreateAdminWindow()
     end
     self.AdminWindow:Show()
+end
+
+-- "Unload" a module (hide UI, stop updates)
+function ClassPower:CloseModule(classToken)
+    local module = self.modules[classToken]
+    if not module then return end
+    
+    -- Hide UI
+    if module.ConfigWindow then
+        module.ConfigWindow:Hide()
+    end
+    if module.BuffBar then
+        module.BuffBar:Hide()
+    end
+    
+    -- Stop updates (if not active class)
+    if classToken ~= self.playerClass then
+        self.loadedModules[classToken] = false
+    end
+    
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Closed "..classToken.." module.")
 end
 
 -----------------------------------------------------------------------------------
@@ -316,44 +338,7 @@ function CP_CreateHUDButton(parent, name)
     return btn
 end
 
------------------------------------------------------------------------------------
--- Slash Command Handler
------------------------------------------------------------------------------------
 
-function ClassPower_SlashHandler(msg)
-    if msg == "debug" then
-        CP_DebugEnabled = not CP_DebugEnabled
-        if CP_DebugEnabled then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r Debug Enabled.")
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r Debug Disabled.")
-        end
-    elseif msg == "reset" then
-        CP_PerUser = {}
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r Settings reset.")
-    elseif msg == "admin" then
-        if ClassPower_IsPromoted() then
-            ClassPower:ShowAdminWindow()
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Admin requires leader/assist.")
-        end
-    elseif msg == "priest" then
-        ClassPower:SwitchViewModule("PRIEST")
-    elseif msg == "paladin" then
-        ClassPower:SwitchViewModule("PALADIN")
-    elseif msg == "druid" then
-        ClassPower:SwitchViewModule("DRUID")
-    elseif msg == "config" or msg == "settings" then
-        CP_ToggleSettingsPanel()
-    else
-        -- Pass to active module
-        if ClassPower.activeModule and ClassPower.activeModule.OnSlashCommand then
-            ClassPower.activeModule:OnSlashCommand(msg)
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No active module or unknown command.")
-        end
-    end
-end
 
 -----------------------------------------------------------------------------------
 -- Event Handler
@@ -374,6 +359,10 @@ function ClassPower_OnEvent(event)
         
     elseif event == "CHAT_MSG_ADDON" then
         if arg1 == CP_PREFIX then
+            if string.find(arg2, "^TANKSYNC") then
+                ClassPower:OnTankSync(arg2)
+            end
+            
             -- Route to ALL loaded modules (for cross-class admin feature)
             for classToken, loaded in pairs(ClassPower.loadedModules) do
                 if loaded then
@@ -447,125 +436,7 @@ if not getglobal("ClassPowerDropDown") then
     CreateFrame("Frame", "ClassPowerDropDown", UIParent, "UIDropDownMenuTemplate")
 end
 
------------------------------------------------------------------------------------
--- Admin Window (for leaders/assists to view all class modules)
------------------------------------------------------------------------------------
 
-function ClassPower:CreateAdminWindow()
-    if self.AdminWindow then return end
-    
-    local f = CreateFrame("Frame", "ClassPowerAdminWindow", UIParent)
-    f:SetWidth(280)
-    f:SetHeight(140)
-    f:SetPoint("CENTER", 0, 100)
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 }
-    })
-    f:SetFrameStrata("HIGH")
-    f:SetToplevel(true)
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:SetClampedToScreen(true)
-    
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", f, "TOP", 0, -20)
-    title:SetText("ClassPower Admin")
-    
-    local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    subtitle:SetText("Select a class module to configure")
-    
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -5, -5)
-    
-    f:SetScript("OnMouseDown", function()
-        if arg1 == "LeftButton" then this:StartMoving() end
-    end)
-    f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
-    
-    -- Class buttons
-    local classes = {
-        {token = "PRIEST", label = "Priests", icon = "Interface\\Icons\\Spell_Holy_WordFortitude", implemented = true},
-        {token = "DRUID", label = "Druids", icon = "Interface\\Icons\\Spell_Nature_Regeneration", implemented = true},
-        {token = "PALADIN", label = "Paladins", icon = "Interface\\Icons\\Spell_Holy_SealOfWisdom", implemented = true},
-        {token = "MAGE", label = "Mages", icon = "Interface\\Icons\\Spell_Frost_IceStorm", implemented = false},
-        {token = "SHAMAN", label = "Shamans", icon = "Interface\\Icons\\Spell_Nature_BloodLust", implemented = false},
-    }
-    
-    local buttonWidth = 70
-    local buttonHeight = 50
-    local startX = 20
-    
-    -- Resize window to fit all buttons
-    f:SetWidth(20 + (table.getn(classes) * (buttonWidth + 10)))
-    
-    for i, class in ipairs(classes) do
-        local btn = CreateFrame("Button", f:GetName()..class.token, f)
-        btn:SetWidth(buttonWidth)
-        btn:SetHeight(buttonHeight)
-        btn:SetPoint("TOPLEFT", f, "TOPLEFT", startX + (i-1) * (buttonWidth + 10), -60)
-        
-        -- Background
-        local bg = btn:CreateTexture(btn:GetName().."Bg", "BACKGROUND")
-        bg:SetAllPoints(btn)
-        bg:SetTexture(0.1, 0.1, 0.1, 0.7)
-        
-        -- Icon
-        local icon = btn:CreateTexture(btn:GetName().."Icon", "ARTWORK")
-        icon:SetWidth(32)
-        icon:SetHeight(32)
-        icon:SetPoint("TOP", btn, "TOP", 0, -4)
-        icon:SetTexture(class.icon)
-        
-        -- Dim unimplemented modules
-        if not class.implemented then
-            icon:SetDesaturated(1)
-            icon:SetAlpha(0.5)
-        end
-        
-        -- Label
-        local label = btn:CreateFontString(btn:GetName().."Label", "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 4)
-        label:SetText(class.label)
-        if not class.implemented then
-            label:SetTextColor(0.5, 0.5, 0.5)
-        end
-        
-        -- Highlight
-        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
-        local ht = btn:GetHighlightTexture()
-        if ht then ht:SetBlendMode("ADD") end
-        
-        btn.classToken = class.token
-        btn.classLabel = class.label
-        btn.implemented = class.implemented
-        btn:SetScript("OnClick", function()
-            if this.implemented then
-                ClassPower:SwitchViewModule(this.classToken)
-            else
-                DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..this.classLabel.." module not yet implemented.")
-            end
-        end)
-        
-        btn:SetScript("OnEnter", function()
-            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-            if this.implemented then
-                GameTooltip:SetText("Open "..this.classLabel.." Configuration")
-            else
-                GameTooltip:SetText(this.classLabel.." (Not Implemented)")
-                GameTooltip:AddLine("This class module is not yet available.", 1, 0.5, 0)
-            end
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    end
-    
-    f:Hide()
-    self.AdminWindow = f
-end
 
 -----------------------------------------------------------------------------------
 -- Minimap Button
@@ -642,7 +513,11 @@ function ClassPower_CreateMinimapButton()
     -- Click handlers
     btn:SetScript("OnClick", function()
         if arg1 == "LeftButton" then
-            ClassPower_SlashHandler("")
+            if IsShiftKeyDown() then
+                ClassPower:ShowAdminWindow()
+            else
+                ClassPower_SlashHandler("")
+            end
         elseif arg1 == "RightButton" then
             -- Right-click could show a menu or toggle HUD
             if ClassPower.activeModule and ClassPower.activeModule.BuffBar then
@@ -658,7 +533,10 @@ function ClassPower_CreateMinimapButton()
     btn:SetScript("OnEnter", function()
         GameTooltip:SetOwner(this, "ANCHOR_LEFT")
         GameTooltip:SetText("ClassPower")
+        GameTooltip:SetText("ClassPower")
         GameTooltip:AddLine("Left-click: Open Config", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Shift+Left-click: Open Admin", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("Right-click: Toggle HUD", 0.7, 0.7, 0.7)
         GameTooltip:AddLine("Right-click: Toggle HUD", 0.7, 0.7, 0.7)
         GameTooltip:AddLine("Drag: Move button", 0.7, 0.7, 0.7)
         GameTooltip:Show()
@@ -875,6 +753,686 @@ function CP_ShowSettingsPanel()
     
     CP_UpdateSettingsPanel()
     CP_SettingsPanel:Show()
+end
+
+-----------------------------------------------------------------------------------
+-- Admin Window
+-----------------------------------------------------------------------------------
+
+
+function ClassPower:ShowAdminWindow()
+    if not self.AdminWindow then
+        self:CreateAdminWindow()
+    end
+    self.AdminWindow:Show()
+end
+
+
+
+function ClassPower:CreateAdminWindow()
+    if self.AdminWindow then return end
+    
+    local f = CreateFrame("Frame", "ClassPowerAdminWindow", UIParent)
+    f:SetWidth(280)
+    f:SetHeight(160)
+    f:SetPoint("CENTER", 0, 100)
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 }
+    })
+    f:SetFrameStrata("HIGH")
+    f:SetToplevel(true)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -20)
+    title:SetText("ClassPower Admin")
+    
+    local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetText("Select a class module to configure")
+    
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+    
+    -- Manage Tanks Button
+    local btnTank = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnTank:SetWidth(105); btnTank:SetHeight(24)
+    btnTank:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 10)
+    btnTank:SetText("Manage Tanks")
+    btnTank:SetScript("OnClick", function() ClassPower:ShowTankManager() end)
+    
+    f:SetScript("OnMouseDown", function()
+        if arg1 == "LeftButton" then this:StartMoving() end
+    end)
+    f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
+    
+    -- Class buttons
+    local classes = {
+        {token = "PRIEST", label = "Priests", icon = "Interface\\Icons\\Spell_Holy_WordFortitude", implemented = true},
+        {token = "DRUID", label = "Druids", icon = "Interface\\Icons\\Spell_Nature_Regeneration", implemented = true},
+        {token = "PALADIN", label = "Paladins", icon = "Interface\\Icons\\Spell_Holy_SealOfWisdom", implemented = true},
+        {token = "MAGE", label = "Mages", icon = "Interface\\Icons\\Spell_Frost_IceStorm", implemented = false},
+        {token = "SHAMAN", label = "Shamans", icon = "Interface\\Icons\\Spell_Nature_BloodLust", implemented = false},
+    }
+    
+    local buttonWidth = 70
+    local buttonHeight = 50
+    local startX = 20
+    
+    -- Resize window to fit all buttons
+    f:SetWidth(20 + (table.getn(classes) * (buttonWidth + 10)))
+    
+    for i, class in ipairs(classes) do
+        local btn = CreateFrame("Button", f:GetName()..class.token, f)
+        btn:SetWidth(buttonWidth)
+        btn:SetHeight(buttonHeight)
+        btn:SetPoint("TOPLEFT", f, "TOPLEFT", startX + (i-1) * (buttonWidth + 10), -60)
+        
+        -- Background
+        local bg = btn:CreateTexture(btn:GetName().."Bg", "BACKGROUND")
+        bg:SetAllPoints(btn)
+        bg:SetTexture(0.1, 0.1, 0.1, 0.7)
+        
+        -- Icon
+        local icon = btn:CreateTexture(btn:GetName().."Icon", "ARTWORK")
+        icon:SetWidth(32)
+        icon:SetHeight(32)
+        icon:SetPoint("TOP", btn, "TOP", 0, -4)
+        icon:SetTexture(class.icon)
+        
+        -- Dim unimplemented modules
+        if not class.implemented then
+            icon:SetDesaturated(1)
+            icon:SetAlpha(0.5)
+        end
+        
+        -- Label
+        local label = btn:CreateFontString(btn:GetName().."Label", "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 4)
+        label:SetText(class.label)
+        if not class.implemented then
+            label:SetTextColor(0.5, 0.5, 0.5)
+        end
+        
+        -- Highlight
+        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+        local ht = btn:GetHighlightTexture()
+        if ht then ht:SetBlendMode("ADD") end
+        
+        btn.classToken = class.token
+        btn.classLabel = class.label
+        btn.implemented = class.implemented
+        btn:SetScript("OnClick", function()
+            if this.implemented then
+                ClassPower:SwitchViewModule(this.classToken)
+            else
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..this.classLabel.." module not yet implemented.")
+            end
+        end)
+        
+        btn:SetScript("OnEnter", function()
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            if this.implemented then
+                GameTooltip:SetText("Open "..this.classLabel.." Configuration")
+            else
+                GameTooltip:SetText(this.classLabel.." (Not Implemented)")
+                GameTooltip:AddLine("This class module is not yet available.", 1, 0.5, 0)
+            end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    
+    f:Hide()
+    self.AdminWindow = f
+end
+
+-----------------------------------------------------------------------------------
+-- Auto-Assign Helper Functions
+-----------------------------------------------------------------------------------
+
+-- Returns a table of group IDs (1-8) that have at least one player
+function ClassPower_GetActiveGroups()
+    local activeGroups = {}
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    if numRaid > 0 then
+        local groupHasPlayers = {}
+        for i = 1, numRaid do
+            local _, _, subgroup = GetRaidRosterInfo(i)
+            if subgroup and subgroup >= 1 and subgroup <= 8 then
+                groupHasPlayers[subgroup] = true
+            end
+        end
+        for g = 1, 8 do
+            if groupHasPlayers[g] then
+                table.insert(activeGroups, g)
+            end
+        end
+    elseif numParty > 0 then
+        -- In a party, everyone is effectively in group 1
+        table.insert(activeGroups, 1)
+    else
+        -- Solo, group 1
+        table.insert(activeGroups, 1)
+    end
+    
+    return activeGroups
+end
+
+-- Distributes groups evenly among a list of players
+-- Returns: { [playerName] = { group1, group2, ... }, ... }
+function ClassPower_DistributeGroups(players, groups)
+    local assignments = {}
+    local numPlayers = table.getn(players)
+    local numGroups = table.getn(groups)
+    
+    if numPlayers == 0 or numGroups == 0 then
+        return assignments
+    end
+    
+    -- Initialize empty assignments for each player
+    for _, player in ipairs(players) do
+        assignments[player] = {}
+    end
+    
+    -- Distribute groups round-robin
+    for i, group in ipairs(groups) do
+        local playerIndex = math.mod(i - 1, numPlayers) + 1
+        local player = players[playerIndex]
+        table.insert(assignments[player], group)
+    end
+    
+    return assignments
+end
+
+
+-----------------------------------------------------------------------------------
+-- Tank Manager System
+-----------------------------------------------------------------------------------
+
+function ClassPower:IsTank(name)
+    for _, tank in ipairs(ClassPower_TankList) do
+        if tank.name == name then return true, tank end
+    end
+    return false, nil
+end
+
+function ClassPower:AddTank(name, role, mark)
+    if not name or name == "" then return end
+    
+    local isTank, existing = self:IsTank(name)
+    if isTank then
+        -- Update existing
+        existing.role = role or existing.role
+        existing.mark = mark or existing.mark
+    else
+        -- Add new
+        table.insert(ClassPower_TankList, {
+            name = name,
+            role = role or "MT",
+            mark = mark or 0
+        })
+    end
+    if self.TankManagerWindow and self.TankManagerWindow:IsVisible() then
+        self:UpdateTankListUI()
+    end
+    -- Reset Paladin assignments on tank change as priorities change
+    if ClassPower.modules["PALADIN"] then
+        ClassPower_SendMessage("TANKUPDATE") -- Notify modules
+    end
+    
+    self:SendTankSync()
+end
+
+function ClassPower:RemoveTank(name)
+    for i, tank in ipairs(ClassPower_TankList) do
+        if tank.name == name then
+            table.remove(ClassPower_TankList, i)
+            if self.TankManagerWindow and self.TankManagerWindow:IsVisible() then
+                self:UpdateTankListUI()
+            end
+            ClassPower_SendMessage("TANKUPDATE")
+            self:SendTankSync()
+            return
+        end
+    end
+end
+
+function ClassPower:AnnounceTanks()
+    if table.getn(ClassPower_TankList) == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("No tanks assigned.")
+        return
+    end
+    
+    local markNames = {
+        "Star", "Circle", "Diamond", "Triangle", 
+        "Moon", "Square", "Cross", "Skull"
+    }
+    SendChatMessage("--- Tank Assignments ---", "RAID")
+    for _, tank in ipairs(ClassPower_TankList) do
+        local markStr = ""
+        if tank.mark and tank.mark > 0 then
+            markStr = "("..(markNames[tank.mark] or "??")..")"
+        end
+        SendChatMessage(tank.name.." ["..(tank.role or "MT").."] "..markStr, "RAID")
+    end
+    SendChatMessage("------------------------", "RAID")
+end
+
+function ClassPower:CreateTankManagerWindow()
+    if self.TankManagerWindow then return end
+    
+    local f = CreateFrame("Frame", "CPTankManagerFrame", UIParent)
+    f:SetWidth(350)
+    f:SetHeight(300)
+    f:SetPoint("CENTER", 0, 0)
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 }
+    })
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    f:Hide()
+    
+    f:SetScript("OnMouseDown", function() if arg1=="LeftButton" then this:StartMoving() end end)
+    f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
+    
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -18)
+    title:SetText("Tank Manager")
+    
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+    
+    -- Dropdown for adding players
+    local dd = CreateFrame("Frame", "CPTankAddDropDown", f, "UIDropDownMenuTemplate")
+    dd:Hide()
+
+    local function TankAddDropDown_Initialize(level)
+        if not level then return end
+        local info = {}
+        
+        if level == 1 then
+            -- Group by subgroups (1-8)
+            info.text = "Add Player"
+            info.isTitle = 1
+            info.notCheckable = 1
+            UIDropDownMenu_AddButton(info, level)
+            
+            for g = 1, 8 do
+                local hasMembers = false
+                -- Quick check if group has members
+                if GetNumRaidMembers() > 0 then
+                    for i=1, GetNumRaidMembers() do
+                        local _, _, subgroup = GetRaidRosterInfo(i)
+                        if subgroup == g then hasMembers = true break end
+                    end
+                elseif GetNumPartyMembers() > 0 and g == 1 then
+                    hasMembers = true
+                end
+                
+                if hasMembers then
+                    info = {}
+                    info.text = "Group "..g
+                    info.hasArrow = 1
+                    info.value = g
+                    info.notCheckable = 1
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end
+        elseif level == 2 then
+            local group = UIDROPDOWNMENU_MENU_VALUE
+            local numRaid = GetNumRaidMembers()
+            
+            if numRaid > 0 then
+                for i = 1, numRaid do
+                    local name, _, subgroup, _, _, class = GetRaidRosterInfo(i)
+                    if subgroup == group then
+                        info = {}
+                        info.text = name
+                        local color = RAID_CLASS_COLORS[class]
+                        if color then
+                            info.text = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, name)
+                        end
+                        info.arg1 = name
+                        info.func = function(arg1) -- arg1 passed from info.arg1
+                            ClassPower:AddTank(arg1, "MT", 0) 
+                            CloseDropDownMenus()
+                        end
+                        info.notCheckable = 1
+                        UIDropDownMenu_AddButton(info, level)
+                    end
+                end
+            elseif group == 1 then
+                -- Party handling
+                 local function AddPartyMember(unit)
+                    if UnitExists(unit) then
+                        local name = UnitName(unit)
+                        local _, class = UnitClass(unit)
+                        info = {}
+                        info.text = name
+                        local color = RAID_CLASS_COLORS[class]
+                        if color then
+                            info.text = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, name)
+                        end
+                        info.arg1 = name
+                        info.func = function(arg1) 
+                            ClassPower:AddTank(arg1, "MT", 0) 
+                            CloseDropDownMenus()
+                        end
+                        info.notCheckable = 1
+                        UIDropDownMenu_AddButton(info, level)
+                    end
+                 end
+                 AddPartyMember("player")
+                 for i=1, GetNumPartyMembers() do AddPartyMember("party"..i) end
+            end
+        end
+    end
+    
+    UIDropDownMenu_Initialize(dd, TankAddDropDown_Initialize, "MENU")
+
+    -- Dropdown for Raid Markers
+    local markDD = CreateFrame("Frame", "CPTankMarkDropDown", f, "UIDropDownMenuTemplate")
+    markDD:Hide()
+    
+    local function TankMarkDropDown_Initialize(level)
+        if not level then return end
+        local tankIndex = UIDROPDOWNMENU_MENU_VALUE
+        if not tankIndex then return end
+        
+        local info = {}
+        info.isTitle = 1
+        info.text = "Select Mark"
+        info.notCheckable = 1
+        UIDropDownMenu_AddButton(info, level)
+        
+        -- Option to clear
+        info = {}
+        info.text = "None"
+        info.arg1 = tankIndex
+        info.arg2 = 0
+        info.func = function(idx, mark)
+            local t = ClassPower_TankList[idx]
+            if t then
+                t.mark = mark
+                ClassPower:UpdateTankListUI()
+                ClassPower:SendTankSync()
+            end
+            CloseDropDownMenus()
+        end
+        UIDropDownMenu_AddButton(info, level)
+        
+        local marks = {"Star", "Circle", "Diamond", "Triangle", "Moon", "Square", "Cross", "Skull"}
+        for i, name in ipairs(marks) do
+            info = {}
+            info.text = name
+            info.arg1 = tankIndex
+            info.arg2 = i
+            info.func = function(idx, mark)
+                local t = ClassPower_TankList[idx]
+                if t then
+                    t.mark = mark
+                    ClassPower:UpdateTankListUI()
+                    ClassPower:SendTankSync()
+                end
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+    UIDropDownMenu_Initialize(markDD, TankMarkDropDown_Initialize, "MENU")
+
+    -- Add Target Button
+    local btnAdd = CreateFrame("Button", "CPTankAddBtn", f, "UIPanelButtonTemplate")
+    btnAdd:SetWidth(100); btnAdd:SetHeight(24)
+    btnAdd:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -50)
+    btnAdd:SetText("Add Target")
+    btnAdd:SetScript("OnClick", function()
+        local name = UnitName("target")
+        if name then
+            ClassPower:AddTank(name, "MT", 0)
+        else
+            -- No target, show dropdown
+            ToggleDropDownMenu(1, nil, dd, "CPTankAddBtn", 0, 0)
+        end
+    end)
+    
+    -- Announce Button
+    local btnAnnounce = CreateFrame("Button", "CPTankAnnounceBtn", f, "UIPanelButtonTemplate")
+    btnAnnounce:SetWidth(100); btnAnnounce:SetHeight(24)
+    btnAnnounce:SetPoint("LEFT", btnAdd, "RIGHT", 10, 0)
+    btnAnnounce:SetText("Announce")
+    btnAnnounce:SetScript("OnClick", function() ClassPower:AnnounceTanks() end)
+
+    -- ScrollFrame for List
+    -- Simplified list for now: fixed 8 rows
+    f.rows = {}
+    local rowHeight = 24
+    for i=1, 8 do
+        local row = CreateFrame("Frame", nil, f)
+        row:SetWidth(310)
+        row:SetHeight(rowHeight)
+        row:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -80 - ((i-1)*rowHeight))
+        
+        -- Name
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.name:SetWidth(100)
+        row.name:SetJustifyH("LEFT")
+        
+        -- Role Cycle Button (MT/OT)
+        row.roleBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.roleBtn:SetWidth(40); row.roleBtn:SetHeight(20)
+        row.roleBtn:SetPoint("LEFT", row.name, "RIGHT", 5, 0)
+        row.roleBtn:SetScript("OnClick", function()
+            local tank = ClassPower_TankList[this:GetParent().index]
+            if tank then
+                tank.role = (tank.role == "MT") and "OT" or "MT"
+                this:SetText(tank.role)
+                ClassPower:UpdateTankListUI()
+                ClassPower:SendTankSync()
+            end
+        end)
+        
+        -- Mark Cycle Button (0-8)
+        row.markBtn = CreateFrame("Button", "ClassPowerTankRow"..i.."MarkBtn", row, "UIPanelButtonTemplate")
+        row.markBtn:SetWidth(24); row.markBtn:SetHeight(24)
+        row.markBtn:SetPoint("LEFT", row.roleBtn, "RIGHT", 5, 0)
+        
+        -- Mark Icon (Overlay on button)
+        row.markIcon = row.markBtn:CreateTexture(nil, "OVERLAY")
+        row.markIcon:SetWidth(18); row.markIcon:SetHeight(18)
+        row.markIcon:SetPoint("CENTER", row.markBtn, "CENTER", 0, 0)
+        
+        row.markBtn:SetScript("OnClick", function()
+             -- Open Dropdown
+             local index = this:GetParent().index
+             ToggleDropDownMenu(1, index, getglobal("CPTankMarkDropDown"), this:GetName(), 0, 0)
+        end)
+        
+        -- Remove Button
+        row.delBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.delBtn:SetWidth(20); row.delBtn:SetHeight(20)
+        row.delBtn:SetPoint("LEFT", row.markBtn, "RIGHT", 5, 0)
+        row.delBtn:SetText("X")
+        row.delBtn:SetScript("OnClick", function()
+             local tank = ClassPower_TankList[this:GetParent().index]
+             if tank then
+                 ClassPower:RemoveTank(tank.name)
+             end
+        end)
+        
+        f.rows[i] = row
+    end
+    
+    self.TankManagerWindow = f
+end
+
+function ClassPower:SetRaidIcon(texture, index)
+    if not index or index == 0 then
+        texture:Hide()
+        return
+    end
+    texture:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+    local col = math.mod(index - 1, 4)
+    local row = math.floor((index - 1) / 4)
+    texture:SetTexCoord(col * 0.25, (col + 1) * 0.25, row * 0.25, (row + 1) * 0.25)
+    texture:Show()
+end
+
+function ClassPower:UpdateTankRow(row, tank)
+    row.name:SetText(tank.name)
+    row.roleBtn:SetText(tank.role)
+    
+    if tank.mark > 0 then
+        ClassPower:SetRaidIcon(row.markIcon, tank.mark)
+        row.markBtn:SetText("")
+    else
+        row.markIcon:Hide()
+        row.markBtn:SetText("-")
+    end
+    row:Show()
+end
+
+function ClassPower:UpdateTankListUI()
+    if not self.TankManagerWindow then return end
+    
+    for i, row in ipairs(self.TankManagerWindow.rows) do
+        local tank = ClassPower_TankList[i]
+        if tank then
+            row.index = i
+            self:UpdateTankRow(row, tank)
+        else
+            row:Hide()
+        end
+    end
+end
+
+function ClassPower:ShowTankManager()
+    self:CreateTankManagerWindow()
+    self:UpdateTankListUI()
+    self.TankManagerWindow:Show()
+end
+
+-----------------------------------------------------------------------------------
+-- Slash Command Handler
+-----------------------------------------------------------------------------------
+
+
+
+function ClassPower_SlashHandler(msg)
+    local _, _, cmd, arg = string.find(msg, "^%s*(%S+)%s*(.*)$")
+    if not cmd then cmd = msg end
+    if not cmd or cmd == "" then
+        -- Default: Open current class config
+        if ClassPower.activeModule and ClassPower.activeModule.ShowConfig then
+            ClassPower.activeModule:ShowConfig()
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No active module loaded.")
+        end
+        return
+    end
+    
+    cmd = string.lower(cmd)
+    
+    if cmd == "admin" then
+        ClassPower:ShowAdminWindow()
+        
+    elseif cmd == "config" or cmd == "options" or cmd == "menu" then
+        if ClassPower.activeModule and ClassPower.activeModule.ShowConfig then
+            ClassPower.activeModule:ShowConfig()
+        end
+        
+    elseif cmd == "debug" then
+        if CP_PerUser.Debug then
+            CP_PerUser.Debug = false
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode disabled.")
+        else
+            CP_PerUser.Debug = true
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode enabled.")
+        end
+        
+    elseif cmd == "reset" then
+        if ClassPower.activeModule and ClassPower.activeModule.ResetUI then
+            ClassPower.activeModule:ResetUI()
+        end
+        
+    elseif cmd == "scale" then
+        local scale = tonumber(arg)
+        if scale and scale >= 0.5 and scale <= 2.0 then
+            if ClassPower.activeModule and ClassPower.activeModule.SetConfigScale then
+                ClassPower.activeModule:SetConfigScale(scale)
+            end
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Usage: /cp scale <0.5-2.0>")
+        end
+        
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Usage:")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp - Open config")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp admin - Open admin window")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp debug - Toggle debug")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp reset - Reset UI positions")
+        DEFAULT_CHAT_FRAME:AddMessage("  /cp scale <n> - Set config scale")
+    end
+end
+SlashCmdList["CLASSPOWER"] = ClassPower_SlashHandler
+
+-----------------------------------------------------------------------------------
+-- Tank Sync
+-----------------------------------------------------------------------------------
+
+function ClassPower:SendTankSync()
+    local msg = "TANKSYNC"
+    for _, tank in ipairs(ClassPower_TankList) do
+        msg = msg .. " " .. tank.name .. "," .. (tank.role or "MT") .. "," .. (tank.mark or 0)
+    end
+    ClassPower_SendMessage(msg)
+end
+
+function ClassPower:OnTankSync(msg)
+    local newList = {}
+    -- Skip "TANKSYNC" prefix
+    for part in string.gfind(msg, "[^ ]+") do
+        if part ~= "TANKSYNC" then
+            local _, _, name, role, mark = string.find(part, "([^,]+),([^,]+),([^,]+)")
+            if name then
+                table.insert(newList, {name = name, role = role, mark = tonumber(mark) or 0})
+            end
+        end
+    end
+    
+    -- Clear and repopulate instead of reassigning (preserves references)
+    for i = table.getn(ClassPower_TankList), 1, -1 do
+        table.remove(ClassPower_TankList, i)
+    end
+    for _, t in ipairs(newList) do
+        table.insert(ClassPower_TankList, t)
+    end
+    
+    -- Refresh all module UIs
+    for _, mod in pairs(self.modules) do
+        if mod.UpdateUI then mod:UpdateUI() end
+        if mod.UpdateConfigGrid then mod:UpdateConfigGrid() end
+    end
+    
+    -- Refresh Tank Manager if visible
+    if self.TankManagerWindow and self.TankManagerWindow:IsVisible() then
+        self:UpdateTankListUI()
+    end
 end
 
 CP_Debug("ClassPower Core loaded.")

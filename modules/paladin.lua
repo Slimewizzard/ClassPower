@@ -151,6 +151,7 @@ Paladin.BuffTimestamps = {}       -- { [playerName] = { [blessingID] = { startTi
 Paladin.RankInfo = {}
 Paladin.SymbolCount = 0           -- Symbol of Kings count
 
+
 -- Estimated durations
 Paladin.BuffDurations = {
     Normal = 600,   -- 10 min
@@ -231,6 +232,8 @@ function Paladin:OnLoad()
     end
     UIDropDownMenu_Initialize(ClassPowerPaladinJudgeDropDown, function(level) Paladin:JudgeDropDown_Initialize(level) end, "MENU")
     
+
+    
     -- Request sync from other paladins
     self:RequestSync()
 end
@@ -256,6 +259,9 @@ function Paladin:OnEvent(event)
             self:ScanRaid()
             self.UIDirty = true
         end
+        
+        -- Update button visibility when roster/rank changes
+        self:UpdateLeaderButtons()
         
         if event == "RAID_ROSTER_UPDATE" then
             if GetTime() - self.LastRequest > 5 then
@@ -693,6 +699,194 @@ function Paladin:GetClassID(class)
 end
 
 -----------------------------------------------------------------------------------
+-- Tank List (for Salvation exemptions)
+-----------------------------------------------------------------------------------
+
+function Paladin:IsTank(playerName)
+    return ClassPower:IsTank(playerName)
+end
+
+-----------------------------------------------------------------------------------
+-- Auto-Assign
+-----------------------------------------------------------------------------------
+
+-- Class needs reference (blessing IDs: 0=Wisdom, 1=Might, 2=Salvation, 3=Light, 4=Kings, 5=Sanctuary)
+Paladin.ClassBlessingNeeds = {
+    -- [classID] = { blessingID = true/false }
+    [0] = { [0]=false, [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Warrior (no Wisdom)
+    [1] = { [0]=false, [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Rogue (no Wisdom)
+    [2] = { [0]=true,  [1]=false, [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Priest (no Might)
+    [3] = { [0]=true,  [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Druid (all)
+    [4] = { [0]=true,  [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Paladin (all)
+    [5] = { [0]=true,  [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Hunter (all - uses mana)
+    [6] = { [0]=true,  [1]=false, [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Mage (no Might)
+    [7] = { [0]=true,  [1]=false, [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Warlock (no Might)
+    [8] = { [0]=true,  [1]=true,  [2]=true,  [3]=true, [4]=true, [5]=true  }, -- Shaman (all)
+    [9] = { [0]=false, [1]=true,  [2]=false, [3]=false,[4]=true, [5]=false }, -- Pet (Kings, Might only)
+}
+
+function Paladin:AutoAssign()
+    if not ClassPower_IsPromoted() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Auto-assign requires Leader/Assist.")
+        return
+    end
+    
+
+    
+    -- Get list of classes present in raid
+    local classesPresent = {}
+    for classID = 0, 9 do
+        if self.CurrentBuffsByClass[classID] and table.getn(self.CurrentBuffsByClass[classID]) > 0 then
+            classesPresent[classID] = true
+        end
+    end
+    
+    -- Get list of Paladins and their capabilities
+    local paladins = {}
+    for paladinName, info in pairs(self.AllPaladins) do
+        local pdata = {
+            name = paladinName,
+            blessings = {},
+            hasImprovedBlessings = false,
+        }
+        for bID = 0, 5 do
+            if info[bID] then
+                pdata.blessings[bID] = true
+                -- Check for Improved Blessings talent
+                if info[bID].talent and info[bID].talent > 0 then
+                    pdata.hasImprovedBlessings = true
+                end
+            end
+        end
+        table.insert(paladins, pdata)
+    end
+    
+    if table.getn(paladins) == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Paladins found.")
+        return
+    end
+    
+    -- Clear all existing blessing assignments
+    for _, pdata in ipairs(paladins) do
+        self.Assignments[pdata.name] = {}
+        for classID = 0, 9 do
+            self.Assignments[pdata.name][classID] = -1
+        end
+    end
+    
+    -- Track which Paladins are assigned to which blessings
+    local blessingAssignments = {} -- { [blessingID] = paladinName }
+    local usedPaladins = {}
+    
+    -- Priority: Salvation(2) > Kings(4) > Might(1)/Wisdom(0) > Light(3) > Sanctuary(5)
+    local priorityOrder = { 2, 4, 1, 0, 3, 5 }
+    
+    -- Find a free Paladin with the blessing
+    local function findPaladinWithBlessing(blessingID, preferImproved)
+        -- First pass: Look for unused paladins
+        for _, pdata in ipairs(paladins) do
+            if pdata.blessings[blessingID] and not usedPaladins[pdata.name] then
+                if preferImproved and pdata.hasImprovedBlessings then
+                    return pdata
+                end
+                return pdata -- Return first unused match
+            end
+        end
+        
+        -- Second pass: Reuse paladins
+        for _, pdata in ipairs(paladins) do
+            if pdata.blessings[blessingID] then
+                return pdata
+            end
+        end
+        return nil
+    end
+    
+    -- Check tank status for each class
+    local classSkipsSalvation = {}
+    for classID = 0, 9 do
+        local members = self.CurrentBuffsByClass[classID]
+        if members and table.getn(members) > 0 then
+            local allTanks = true
+            for _, info in ipairs(members) do
+                if not self:IsTank(info.name) then
+                    allTanks = false
+                    break
+                end
+            end
+            if allTanks then
+                classSkipsSalvation[classID] = true
+            end
+        end
+    end
+    
+    local classesSatisfied = {}
+
+    -- Assign blessings in priority order
+    for _, bID in ipairs(priorityOrder) do
+        -- Special handling for Might/Wisdom overlap on hybrids
+        local preferImproved = (bID == 0 or bID == 1) -- Prefer improved for Might/Wisdom
+        
+        local paladin = findPaladinWithBlessing(bID, preferImproved)
+        if paladin then
+            usedPaladins[paladin.name] = true
+            blessingAssignments[bID] = paladin.name
+            
+            -- Assign this blessing to all classes that need it
+            for classID = 0, 9 do
+                if classesPresent[classID] and not classesSatisfied[classID] then
+                    local needs = self.ClassBlessingNeeds[classID]
+                    -- Skip Salvation if class is all tanks
+                    local skipSalvation = (bID == 2 and classSkipsSalvation[classID])
+                    
+                    -- For Paladin Tanks (ID 4), prefer Sanctuary(5) over Might(1)/Wisdom(0)/Light(3)
+                    -- Kings(4) is still preferred as it is higher priority than 1/0/3/5.
+                    local skipForTank = false
+                    if classID == 4 and classSkipsSalvation[classID] and (bID == 1 or bID == 0 or bID == 3) then
+                        skipForTank = true
+                    end
+                    
+                    if needs and needs[bID] and not skipSalvation and not skipForTank then
+                        self.Assignments[paladin.name][classID] = bID
+                        classesSatisfied[classID] = true
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Broadcast assignments (Batch)
+    for paladinName, assigns in pairs(self.Assignments) do
+        local assignStr = ""
+        for classID = 0, 9 do
+            local bID = assigns[classID]
+            if bID and bID >= 0 then
+                assignStr = assignStr .. bID
+            else
+                assignStr = assignStr .. "n"
+            end
+        end
+        ClassPower_SendMessage("PASSIGNS "..paladinName.." "..assignStr)
+    end
+    
+    -- Report
+    local msgs = {}
+    for bID, paladinName in pairs(blessingAssignments) do
+        table.insert(msgs, paladinName.." -> "..self.Blessings[bID].short)
+    end
+    
+    if table.getn(msgs) > 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Auto-assigned: "..table.concat(msgs, ", "))
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No blessings could be assigned.")
+    end
+    
+    -- Update UI
+    self:UpdateConfigGrid()
+    self:SaveAssignments()
+end
+
+-----------------------------------------------------------------------------------
 -- Sync Protocol
 -----------------------------------------------------------------------------------
 
@@ -804,6 +998,25 @@ function Paladin:OnAddonMessage(sender, msg)
                 self.Assignments[name] = self.Assignments[name] or {}
                 self.Assignments[name][tonumber(classID)] = tonumber(blessID)
                 self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
+            end
+        end
+        
+    elseif string.find(msg, "^PASSIGNS ") then
+        local _, _, name, assignStr = string.find(msg, "^PASSIGNS (.-) (.*)")
+        if name and assignStr then
+            if sender == name or ClassPower_IsPromoted(sender) then
+                self.Assignments[name] = self.Assignments[name] or {}
+                for classID = 0, 9 do
+                    local val = string.sub(assignStr, classID + 1, classID + 1)
+                    if val ~= "n" and val ~= "" then
+                        self.Assignments[name][classID] = tonumber(val) or -1
+                    else
+                        self.Assignments[name][classID] = -1
+                    end
+                end
+                self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
             end
         end
         
@@ -817,6 +1030,7 @@ function Paladin:OnAddonMessage(sender, msg)
                     self.AuraAssignments[name] = tonumber(auraID)
                 end
                 self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
             end
         end
         
@@ -830,6 +1044,7 @@ function Paladin:OnAddonMessage(sender, msg)
                     self.JudgementAssignments[name] = tonumber(judgeID)
                 end
                 self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
             end
         end
         
@@ -851,6 +1066,7 @@ function Paladin:OnAddonMessage(sender, msg)
                 self.JudgementAssignments[target] = nil
                 if target == UnitName("player") then
                     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Assignments cleared by "..sender)
+                    self:SaveAssignments()
                 end
                 self.UIDirty = true
             end
@@ -1396,7 +1612,65 @@ function Paladin:CreateConfigWindow()
     btnSettings:SetScript("OnClick", function()
         CP_ShowSettingsPanel()
     end)
+    
+    -- Auto-Assign button (only visible for leaders/assists)
+    local autoBtn = CreateFrame("Button", f:GetName().."AutoAssignBtn", f, "UIPanelButtonTemplate")
+    autoBtn:SetWidth(90)
+    autoBtn:SetHeight(24)
+    autoBtn:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
+    autoBtn:SetText("Auto-Assign")
+    autoBtn:SetScript("OnClick", function()
+        Paladin:AutoAssign()
+    end)
+    autoBtn:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auto-Assign Blessings")
+        GameTooltip:AddLine("Automatically distribute blessings", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("based on class needs and priority.", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(" ", 1, 1, 1)
+        GameTooltip:AddLine("Priority: Salv > Kings > Might/Wis > Light > Sanc", 1, 0.82, 0)
+        GameTooltip:AddLine(" ", 1, 1, 1)
+        GameTooltip:AddLine("Requires Leader/Assist", 1, 0.5, 0)
+        GameTooltip:Show()
+    end)
+    autoBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    
 
+    
+    -- Update visibility based on promotion status
+    -- Update visibility based on promotion status
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(24)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("PALADIN")
+    end)
+    closeModBtn:Hide()
+
+    f:SetScript("OnShow", function()
+        -- Auto-Assign Visibility
+        local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
+        if ClassPower_IsPromoted() then
+            if autoAssignBtn then autoAssignBtn:Show() end
+        else
+            if autoAssignBtn then autoAssignBtn:Hide() end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Paladin" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
+            end
+        end
+    end)
     
     f:Hide()
     self.ConfigWindow = f
@@ -1964,6 +2238,8 @@ function Paladin:JudgeDropDown_OnClick(judgeID)
     end
 end
 
+
+
 -----------------------------------------------------------------------------------
 -- Update UI
 -----------------------------------------------------------------------------------
@@ -2101,6 +2377,18 @@ function Paladin:UpdateUI()
     self:UpdateBuffBar()
     if self.ConfigWindow and self.ConfigWindow:IsVisible() then
         self:UpdateConfigGrid()
+    end
+end
+
+function Paladin:UpdateLeaderButtons()
+    if not self.ConfigWindow then return end
+    
+    local autoBtn = getglobal(self.ConfigWindow:GetName().."AutoAssignBtn")
+    
+    if ClassPower_IsPromoted() then
+        if autoBtn then autoBtn:Show() end
+    else
+        if autoBtn then autoBtn:Hide() end
     end
 end
 

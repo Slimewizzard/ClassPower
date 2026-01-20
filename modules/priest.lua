@@ -210,6 +210,9 @@ function Priest:OnEvent(event)
             self.UIDirty = true
         end
         
+        -- Update button visibility when roster/rank changes
+        self:UpdateLeaderButtons()
+        
         if event == "RAID_ROSTER_UPDATE" then
             if GetTime() - self.LastRequest > 5 then
                 self:RequestSync()
@@ -546,6 +549,122 @@ function Priest:ScanRaid()
 end
 
 -----------------------------------------------------------------------------------
+-- Auto-Assign
+-----------------------------------------------------------------------------------
+
+function Priest:AutoAssign()
+    if not ClassPower_IsPromoted() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Auto-assign requires Leader/Assist.")
+        return
+    end
+    
+    -- Get active groups (groups with players)
+    local activeGroups = ClassPower_GetActiveGroups()
+    if table.getn(activeGroups) == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No groups with players found.")
+        return
+    end
+    
+    -- Get Priests with Prayer buffs for each type
+    -- Buff types: 0=Fort, 1=Spirit, 2=Shadow
+    -- talent = 1 means they have Prayer version
+    local priestsByBuff = {
+        [0] = {}, -- Priests with Prayer of Fortitude
+        [1] = {}, -- Priests with Prayer of Spirit
+        [2] = {}, -- Priests with Prayer of Shadow Protection
+    }
+    
+    for priestName, info in pairs(self.AllPriests) do
+        for buffType = 0, 2 do
+            if info[buffType] and info[buffType].talent == 1 then
+                table.insert(priestsByBuff[buffType], priestName)
+            end
+        end
+    end
+    
+    -- Clear all group assignments first
+    for priestName, _ in pairs(self.AllPriests) do
+        self.Assignments[priestName] = self.Assignments[priestName] or {}
+        for g = 1, 8 do
+            self.Assignments[priestName][g] = 0
+        end
+    end
+    
+    -- Assign each buff type
+    local buffNames = { [0] = "Fort", [1] = "Spirit", [2] = "Shadow" }
+    local msgs = {}
+    
+    for buffType = 0, 2 do
+        local priests = priestsByBuff[buffType]
+        if table.getn(priests) > 0 then
+            local assignments = ClassPower_DistributeGroups(priests, activeGroups)
+            
+            -- Apply assignments (bit flags: Fort=1, Spirit=2, Shadow=4)
+            local bitFlag = 2 ^ buffType
+            
+            for priestName, groups in pairs(assignments) do
+                for _, g in ipairs(groups) do
+                    -- Add this buff type to existing assignment
+                    local current = self.Assignments[priestName][g] or 0
+                    -- Check if bit already set
+                    local hasBit = (math.mod(math.floor(current / bitFlag), 2) == 1)
+                    if not hasBit then
+                        self.Assignments[priestName][g] = current + bitFlag
+                    end
+                end
+            end
+            
+            -- Build report message
+            for priestName, groups in pairs(assignments) do
+                if table.getn(groups) > 0 then
+                    local groupStr = ""
+                    for i, g in ipairs(groups) do
+                        if i > 1 then groupStr = groupStr .. "," end
+                        groupStr = groupStr .. g
+                    end
+                    table.insert(msgs, priestName .. " " .. buffNames[buffType] .. " G" .. groupStr)
+                end
+            end
+        end
+    end
+    
+    -- Report what was done
+    if table.getn(msgs) > 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Auto-assigned: " .. table.concat(msgs, " | "))
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Priests with Prayer buffs found.")
+    end
+    
+    -- Batch Sync
+    for priestName, _ in pairs(self.AllPriests) do
+        self:SendBatchAssignments(priestName)
+    end
+    
+    -- Update UI
+    self:SaveAssignments()
+    self.UIDirty = true
+    self:UpdateConfigGrid()
+    self:UpdateBuffBar()
+end
+
+function Priest:SendBatchAssignments(pname)
+    if not pname then pname = UnitName("player") end
+    local assigns = self.Assignments[pname] or {}
+    local msg = "PRASSIGNS " .. pname
+    
+    for i = 1, 8 do
+        msg = msg .. " " .. (assigns[i] or 0)
+    end
+    
+    -- Add Champ and Enlighten
+    local legacy = self.LegacyAssignments[pname] or {}
+    msg = msg .. " " .. (legacy["Champ"] or "nil")
+    msg = msg .. " " .. (legacy["Enlighten"] or "nil")
+    
+    ClassPower_SendMessage(msg)
+end
+
+-----------------------------------------------------------------------------------
 -- Sync Protocol
 -----------------------------------------------------------------------------------
 
@@ -636,23 +755,43 @@ function Priest:OnAddonMessage(sender, msg)
             self.LegacyAssignments[sender]["Champ"] = nil
         end
         self.UIDirty = true
-    elseif string.find(msg, "^ASSIGN ") then
-        local _, _, name, class, skill = string.find(msg, "^ASSIGN (.-) (.-) (.*)")
-        if name and class and skill then
+    elseif string.find(msg, "^PRASSIGNS ") then
+        local _, _, name, g1, g2, g3, g4, g5, g6, g7, g8, champ, enlight = string.find(msg, "^PRASSIGNS (.-) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (.-) (.*)")
+        if name and g1 then
             if sender == name or ClassPower_IsPromoted(sender) then
-                self.Assignments[name] = self.Assignments[name] or {}
-                self.Assignments[name][tonumber(class)] = tonumber(skill)
+                self.Assignments[name] = {
+                    [1] = tonumber(g1), [2] = tonumber(g2), [3] = tonumber(g3), [4] = tonumber(g4),
+                    [5] = tonumber(g5), [6] = tonumber(g6), [7] = tonumber(g7), [8] = tonumber(g8)
+                }
+                self.LegacyAssignments[name] = self.LegacyAssignments[name] or {}
+                self.LegacyAssignments[name]["Champ"] = (champ == "nil") and nil or champ
+                self.LegacyAssignments[name]["Enlighten"] = (enlight == "nil") and nil or enlight
+                
                 self.UIDirty = true
+                self:SaveAssignments()
+                self:UpdateConfigGrid()
+                self:UpdateBuffBar()
             end
         end
-    elseif string.find(msg, "^ASSIGNCHAMP ") then
-        local _, _, name, target = string.find(msg, "^ASSIGNCHAMP (.-) (.*)")
+    elseif string.find(msg, "^ASSIGN ") or string.find(msg, "^PRASSIGN ") then
+        local _, _, name, gid, val = string.find(msg, " (.-) (%d+) (%d+)")
+        if name and gid and val then
+            if sender == name or ClassPower_IsPromoted(sender) then
+                self.Assignments[name] = self.Assignments[name] or {}
+                self.Assignments[name][tonumber(gid)] = tonumber(val)
+                self.UIDirty = true
+                self:SaveAssignments()
+            end
+        end
+    elseif string.find(msg, "^ASSIGNCHAMP ") or string.find(msg, "^PRCHAMP ") then
+        local _, _, name, target = string.find(msg, " (.-) (.*)")
         if name and target then
             if sender == name or ClassPower_IsPromoted(sender) then
                 if target == "nil" or target == "" then target = nil end
                 self.LegacyAssignments[name] = self.LegacyAssignments[name] or {}
                 self.LegacyAssignments[name]["Champ"] = target
                 self.UIDirty = true
+                self:SaveAssignments()
             end
         end
     elseif string.find(msg, "^CLEAR ") then
@@ -665,6 +804,7 @@ function Priest:OnAddonMessage(sender, msg)
                     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Assignments cleared by "..sender)
                 end
                 self.UIDirty = true
+                self:SaveAssignments()
             end
         end
     end
@@ -955,9 +1095,9 @@ function Priest:UpdateBuffBar()
         elseif assigns and assigns[i] and assigns[i] > 0 then
             -- Group Rows
             local val = assigns[i]
-            local fS = math.mod(val, 4)
-            local sS = math.mod(math.floor(val/4), 4)
-            local shS = math.mod(math.floor(val/16), 4)
+            local fS = math.mod(val, 2)
+            local sS = math.mod(math.floor(val/2), 2)
+            local shS = math.mod(math.floor(val/4), 2)
             
             local function GetStats(buffKey, buffType)
                  local missing = 0
@@ -1156,7 +1296,61 @@ function Priest:CreateConfigWindow()
     btnSettings:SetScript("OnClick", function()
         CP_ShowSettingsPanel()
     end)
+    
+    -- Auto-Assign button (only visible for leaders/assists)
+    local autoBtn = CreateFrame("Button", f:GetName().."AutoAssignBtn", f, "UIPanelButtonTemplate")
+    autoBtn:SetWidth(90)
+    autoBtn:SetHeight(24)
+    autoBtn:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
+    autoBtn:SetText("Auto-Assign")
+    autoBtn:SetScript("OnClick", function()
+        Priest:AutoAssign()
+    end)
+    autoBtn:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auto-Assign Groups")
+        GameTooltip:AddLine("Automatically distribute groups", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("among Priests with Prayer buffs.", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(" ", 1, 1, 1)
+        GameTooltip:AddLine("Requires Leader/Assist", 1, 0.5, 0)
+        GameTooltip:Show()
+    end)
+    autoBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(24)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("PRIEST")
+    end)
+    closeModBtn:Hide()
 
+    -- Update visibility based on promotion status
+    f:SetScript("OnShow", function()
+        local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
+        if autoAssignBtn then
+            if ClassPower_IsPromoted() then
+                autoAssignBtn:Show()
+            else
+                autoAssignBtn:Hide()
+            end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Priest" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
+            end
+        end
+    end)
     
     f:Hide()
     self.ConfigWindow = f
@@ -1392,10 +1586,10 @@ function Priest:UpdateGroupButtons(rowIndex, priestName)
     
     for g = 1, 8 do
         local val = assigns[g] or 0
-        -- Decode states - any non-zero means assigned
-        local fState = math.mod(val, 4)
-        local sState = math.mod(math.floor(val/4), 4)
-        local shState = math.mod(math.floor(val/16), 4)
+        -- Decode states (1=Fort, 2=Spirit, 4=Shadow)
+        local fState = math.mod(val, 2)
+        local sState = math.mod(math.floor(val/2), 2)
+        local shState = math.mod(math.floor(val/4), 2)
         
         local prefix = "CPPriestRow"..rowIndex.."Group"..g
         
@@ -1674,15 +1868,10 @@ function Priest:SubButton_OnClick(btn)
     self.Assignments[priestName] = self.Assignments[priestName] or {}
     local cur = self.Assignments[priestName][grpIdx] or 0
     
-    -- Decode current states (each buff uses 2 bits, but we only use 0 or 1)
-    local f = math.mod(cur, 4)
-    local s = math.mod(math.floor(cur/4), 4)
-    local sh = math.mod(math.floor(cur/16), 4)
-    
-    -- Normalize to 0 or 1
-    if f > 0 then f = 1 end
-    if s > 0 then s = 1 end
-    if sh > 0 then sh = 1 end
+    -- Decode current states (Bits: 1=Fort, 2=Spirit, 4=Shadow)
+    local f = math.mod(cur, 2)
+    local s = math.mod(math.floor(cur/2), 2)
+    local sh = math.mod(math.floor(cur/4), 2)
     
     -- Shift-click toggles all three buffs together
     if IsShiftKeyDown() then
@@ -1703,10 +1892,13 @@ function Priest:SubButton_OnClick(btn)
         end
     end
     
-    cur = f + (s * 4) + (sh * 16)
-    self.Assignments[priestName][grpIdx] = cur
-    ClassPower_SendMessage("ASSIGN "..priestName.." "..grpIdx.." "..cur)
+    local newVal = f + (s * 2) + (sh * 4)
+    self.Assignments[priestName][grpIdx] = newVal
+    
+    ClassPower_SendMessage("PRASSIGN " .. priestName .. " " .. grpIdx .. " " .. newVal)
+    
     self:SaveAssignments()
+    self.UIDirty = true
     self:UpdateConfigGrid()
     self:UpdateBuffBar()
 end
@@ -1819,6 +2011,18 @@ function Priest:UpdateUI()
     end
 end
 
+function Priest:UpdateLeaderButtons()
+    if not self.ConfigWindow then return end
+    
+    local autoBtn = getglobal(self.ConfigWindow:GetName().."AutoAssignBtn")
+    
+    if ClassPower_IsPromoted() then
+        if autoBtn then autoBtn:Show() end
+    else
+        if autoBtn then autoBtn:Hide() end
+    end
+end
+
 function Priest:ResetUI()
     CP_PerUser.Point = nil
     CP_PerUser.RelativePoint = nil
@@ -1922,11 +2126,11 @@ function Priest:AssignTarget_OnClick()
     if targetName == "CLEAR" then
         self.LegacyAssignments[pname][mode] = nil
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared "..mode.." for "..pname)
-        ClassPower_SendMessage("ASSIGNCHAMP "..pname.." nil")
+        ClassPower_SendMessage("PRCHAMP "..pname.." nil")
     else
         self.LegacyAssignments[pname][mode] = targetName
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: "..pname.." "..mode.." = "..targetName)
-        ClassPower_SendMessage("ASSIGNCHAMP "..pname.." "..targetName)
+        ClassPower_SendMessage("PRCHAMP "..pname.." "..targetName)
     end
     
     self.UIDirty = true

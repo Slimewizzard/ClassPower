@@ -180,6 +180,9 @@ function Druid:OnEvent(event)
             self.UIDirty = true
         end
         
+        -- Update button visibility when roster/rank changes
+        self:UpdateLeaderButtons()
+        
         if event == "RAID_ROSTER_UPDATE" then
             if GetTime() - self.LastRequest > 5 then
                 self:RequestSync()
@@ -703,6 +706,112 @@ function Druid:GetInnervateCooldown()
 end
 
 -----------------------------------------------------------------------------------
+-- Auto-Assign
+-----------------------------------------------------------------------------------
+
+function Druid:AutoAssign()
+    if not ClassPower_IsPromoted() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Auto-assign requires Leader/Assist.")
+        return
+    end
+    
+    -- Get active groups (groups with players)
+    local activeGroups = ClassPower_GetActiveGroups()
+    if table.getn(activeGroups) == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No groups with players found.")
+        return
+    end
+    
+    -- Get Druids with Gift of the Wild (talent = 1 means they have Gift)
+    local druidsWithGift = {}
+    for druidName, info in pairs(self.AllDruids) do
+        if info[0] and info[0].talent == 1 then
+            table.insert(druidsWithGift, druidName)
+        end
+    end
+    
+    if table.getn(druidsWithGift) == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No Druids with Gift of the Wild found.")
+        return
+    end
+    
+    -- Distribute groups among Druids
+    local assignments = ClassPower_DistributeGroups(druidsWithGift, activeGroups)
+    
+    -- Apply assignments and broadcast
+    for druidName, groups in pairs(assignments) do
+        -- Clear existing group assignments for this druid
+        self.Assignments[druidName] = self.Assignments[druidName] or {}
+        local assignStr = ""
+        
+        for g = 1, 8 do
+            local assigned = 0
+            for _, ag in ipairs(groups) do
+                if ag == g then assigned = 1 break end
+            end
+            self.Assignments[druidName][g] = assigned
+            assignStr = assignStr .. assigned
+        end
+        
+        -- Broadcast batch assignment
+        ClassPower_SendMessage("DASSIGNS "..druidName.." "..assignStr)
+    end
+    
+    -- Report what was done
+    local msg = "|cff00ff00ClassPower|r: Auto-assigned groups: "
+    for druidName, groups in pairs(assignments) do
+        if table.getn(groups) > 0 then
+            local groupStr = ""
+            for i, g in ipairs(groups) do
+                if i > 1 then groupStr = groupStr .. "," end
+                groupStr = groupStr .. g
+            end
+            msg = msg .. druidName .. " -> G" .. groupStr .. "  "
+        end
+    end
+    DEFAULT_CHAT_FRAME:AddMessage(msg)
+    
+    -- Sync Thorns from Tank List (for current player)
+    self:SyncThornsWithTanks()
+    
+    -- Update UI
+    self:UpdateConfigGrid()
+    self:UpdateBuffBar()
+    
+    -- Save assignments
+    self:SaveAssignments()
+end
+
+function Druid:SyncThornsWithTanks()
+    if not ClassPower_TankList then return end
+    
+    local pname = UnitName("player")
+    if not self.ThornsList[pname] then self.ThornsList[pname] = {} end
+    
+    local count = 0
+    for _, tank in ipairs(ClassPower_TankList) do
+        -- Check if already in list
+        local found = false
+        for _, tName in ipairs(self.ThornsList[pname]) do
+            if tName == tank.name then 
+                found = true 
+                break 
+            end
+        end
+        
+        if not found then
+            table.insert(self.ThornsList[pname], tank.name)
+            count = count + 1
+        end
+    end
+    
+    if count > 0 then
+        self:SaveThornsList()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added "..count.." tanks to your Thorns list.")
+    end
+end
+
+-----------------------------------------------------------------------------------
 -- Sync Protocol
 -----------------------------------------------------------------------------------
 
@@ -782,6 +891,23 @@ function Druid:OnAddonMessage(sender, msg)
             self.LegacyAssignments[sender]["Innervate"] = nil
         end
         self.UIDirty = true
+    elseif string.find(msg, "^DASSIGNS ") then
+        local _, _, name, assignStr = string.find(msg, "^DASSIGNS (.-) (.*)")
+        if name and assignStr then
+            if sender == name or ClassPower_IsPromoted(sender) then
+                self.Assignments[name] = self.Assignments[name] or {}
+                for gid = 1, 8 do
+                    local val = string.sub(assignStr, gid, gid)
+                    if val ~= "n" and val ~= "" then
+                        self.Assignments[name][gid] = tonumber(val)
+                    else
+                        self.Assignments[name][gid] = 0
+                    end
+                end
+                self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
+            end
+        end
     elseif string.find(msg, "^DASSIGN ") then
         local _, _, name, grp, skill = string.find(msg, "^DASSIGN (.-) (.-) (.*)")
         if name and grp and skill then
@@ -789,6 +915,7 @@ function Druid:OnAddonMessage(sender, msg)
                 self.Assignments[name] = self.Assignments[name] or {}
                 self.Assignments[name][tonumber(grp)] = tonumber(skill)
                 self.UIDirty = true
+                if name == UnitName("player") then self:SaveAssignments() end
             end
         end
     elseif string.find(msg, "^DASSIGNTARGET ") then
@@ -813,6 +940,27 @@ function Druid:OnAddonMessage(sender, msg)
                     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Assignments cleared by "..sender)
                 end
                 self.UIDirty = true
+            end
+        end
+    elseif string.find(msg, "^DTHORNS ") then
+        local _, _, cmd, target, param = string.find(msg, "^DTHORNS ([^ ]+) ([^ ]+) (.*)")
+        -- Try 2-arg match if 3-arg failed (e.g. CLEAR)
+        if not cmd then 
+             _, _, cmd, target = string.find(msg, "^DTHORNS ([^ ]+) (.*)")
+        end
+        
+        if cmd and target then
+            if sender == target or ClassPower_IsPromoted(sender) then
+                if cmd == "ADD" and param then
+                    self:AddToThornsList(target, param)
+                    self.UIDirty = true
+                elseif cmd == "REMOVE" and param then
+                    self:RemoveFromThornsList(target, param)
+                    self.UIDirty = true
+                elseif cmd == "CLEAR" then
+                    self:ClearThornsList(target)
+                    self.UIDirty = true
+                end
             end
         end
     end
@@ -1377,6 +1525,61 @@ function Druid:CreateConfigWindow()
     end)
     settingsBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
+    end)
+    
+    -- Auto-Assign button (only visible for leaders/assists)
+    local autoBtn = CreateFrame("Button", f:GetName().."AutoAssignBtn", f, "UIPanelButtonTemplate")
+    autoBtn:SetWidth(90)
+    autoBtn:SetHeight(22)
+    autoBtn:SetPoint("LEFT", settingsBtn, "RIGHT", 10, 0)
+    autoBtn:SetText("Auto-Assign")
+    autoBtn:SetScript("OnClick", function()
+        Druid:AutoAssign()
+    end)
+    autoBtn:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auto-Assign Groups")
+        GameTooltip:AddLine("Automatically distribute groups", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("among Druids with Gift of the Wild.", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(" ", 1, 1, 1)
+        GameTooltip:AddLine("Requires Leader/Assist", 1, 0.5, 0)
+        GameTooltip:Show()
+    end)
+    autoBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    
+    -- Close Module Button (for admin usage)
+    local closeModBtn = CreateFrame("Button", f:GetName().."CloseModuleBtn", f, "UIPanelButtonTemplate")
+    closeModBtn:SetWidth(90)
+    closeModBtn:SetHeight(22)
+    closeModBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 15)
+    closeModBtn:SetText("Close Module")
+    closeModBtn:SetScript("OnClick", function()
+        ClassPower:CloseModule("DRUID")
+    end)
+    closeModBtn:Hide()
+
+    -- Update visibility based on promotion status
+    f:SetScript("OnShow", function()
+        local autoAssignBtn = getglobal(this:GetName().."AutoAssignBtn")
+        if autoAssignBtn then
+            if ClassPower_IsPromoted() then
+                autoAssignBtn:Show()
+            else
+                autoAssignBtn:Hide()
+            end
+        end
+        
+        -- Close Module Visibility (only if not player class)
+        local closeBtn = getglobal(this:GetName().."CloseModuleBtn")
+        if closeBtn then
+            if UnitClass("player") ~= "Druid" then
+                closeBtn:Show()
+            else
+                closeBtn:Hide()
+            end
+        end
     end)
     
     f:Hide()
@@ -2017,9 +2220,9 @@ function Druid:ThornsButton_OnClick(btn)
     local druidName = nameStr and nameStr:GetText()
     if not druidName then return end
     
-    -- Only allow self to manage own thorns list
-    if druidName ~= UnitName("player") then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You can only manage your own Thorns list.")
+    -- Only allow self to manage own thorns list (unless promoted)
+    if druidName ~= UnitName("player") and not ClassPower_IsPromoted() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: You must be promoted (Leader/Assist) to manage others' Thorns list.")
         return
     end
     
@@ -2112,6 +2315,18 @@ function Druid:UpdateUI()
     end
 end
 
+function Druid:UpdateLeaderButtons()
+    if not self.ConfigWindow then return end
+    
+    local autoBtn = getglobal(self.ConfigWindow:GetName().."AutoAssignBtn")
+    
+    if ClassPower_IsPromoted() then
+        if autoBtn then autoBtn:Show() end
+    else
+        if autoBtn then autoBtn:Hide() end
+    end
+end
+
 function Druid:ResetUI()
     CP_PerUser.DruidPoint = nil
     CP_PerUser.DruidRelativePoint = nil
@@ -2181,6 +2396,15 @@ function Druid:TargetDropDown_Initialize(level)
                 info.notCheckable = 1
                 UIDropDownMenu_AddButton(info)
             end
+            
+            -- Add Tanks from TankList Option
+            if ClassPower_TankList and table.getn(ClassPower_TankList) > 0 then
+                info = {}
+                info.text = "|cff00ff00+ Add All Tanks|r"
+                info.value = "ADDTANKS"
+                info.func = function() Druid:AssignTarget_OnClick() end
+                UIDropDownMenu_AddButton(info)
+            end
         end
         
         local numRaid = GetNumRaidMembers()
@@ -2246,15 +2470,33 @@ function Druid:AssignTarget_OnClick()
     
     if mode == "Thorns" then
         -- Handle Thorns list
-        if targetName == "CLEAR" then
+        if targetName == "ADDTANKS" then
+            if ClassPower_TankList then
+                local count = 0
+                for _, tank in ipairs(ClassPower_TankList) do
+                    -- Check if not already in list to avoid spamming "Added" messages locally if possible
+                    -- But AddToThornsList handles duplicates gracefully (prints message though)
+                    self:AddToThornsList(pname, tank.name)
+                    ClassPower_SendMessage("DTHORNS ADD "..pname.." "..tank.name)
+                    count = count + 1
+                end
+                if count > 0 then
+                     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Added all tanks to " .. pname .. "'s Thorns list.")
+                     self:UpdateUI()
+                end
+            end
+        elseif targetName == "CLEAR" then
             self:ClearThornsList(pname)
+            ClassPower_SendMessage("DTHORNS CLEAR "..pname)
         elseif string.find(targetName, "^REMOVE:") then
             local _, _, removeName = string.find(targetName, "^REMOVE:(.*)")
             if removeName then
                 self:RemoveFromThornsList(pname, removeName)
+                ClassPower_SendMessage("DTHORNS REMOVE "..pname.." "..removeName)
             end
         else
             self:AddToThornsList(pname, targetName)
+            ClassPower_SendMessage("DTHORNS ADD "..pname.." "..targetName)
         end
     else
         -- Handle Innervate (single target)
