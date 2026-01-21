@@ -115,7 +115,7 @@ function Druid:ScanGear()
     
     if self.BuffDurations.Thorns ~= newDuration then
         self.BuffDurations.Thorns = newDuration
-        CP_Debug("Thorns duration updated to "..newDuration.."s (Cenarion: "..cenarionCount..", Stormrage: "..stormrageCount..")")
+        ClassPower_Debug("Thorns duration updated to "..newDuration.."s (Cenarion: "..cenarionCount..", Stormrage: "..stormrageCount..")")
     end
 end
 
@@ -124,16 +124,16 @@ end
 -----------------------------------------------------------------------------------
 
 function Druid:OnLoad()
-    CP_Debug("Druid:OnLoad()")
+    ClassPower_Debug("Druid:OnLoad()")
     
     -- Load saved Thorns list
-    if CP_PerUser.DruidThornsList then
-        self.ThornsList = CP_PerUser.DruidThornsList
+    if ClassPower_PerUser.DruidThornsList then
+        self.ThornsList = ClassPower_PerUser.DruidThornsList
     end
     
     -- Load saved Innervate thresholds
-    if CP_PerUser.DruidInnervateThreshold then
-        self.InnervateThreshold = CP_PerUser.DruidInnervateThreshold
+    if ClassPower_PerUser.DruidInnervateThreshold then
+        self.InnervateThreshold = ClassPower_PerUser.DruidInnervateThreshold
     end
     
     -- Load saved group assignments and Innervate target
@@ -217,10 +217,23 @@ function Druid:OnUpdate(elapsed)
     end
     
     -- Determine refresh interval based on display mode
-    local displayMode = CP_PerUser.BuffDisplayMode or "missing"
+    local displayMode = ClassPower_PerUser.BuffDisplayMode or "missing"
     local refreshInterval = 5.0  -- Default 5 seconds for "missing" mode
     if displayMode == "always" or displayMode == "timer" then
         refreshInterval = 1.0  -- 1 second for timer modes
+    end
+    
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
     end
     
     -- UI refresh
@@ -242,13 +255,6 @@ function Druid:OnUpdate(elapsed)
             self:ScanRaid()
             self:UpdateUI()
         end
-    -- Also update immediately if dirty flag is set and UI is visible
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
-            self:UpdateUI()
-        end
     end
     
     -- Background distributed scanning
@@ -262,11 +268,9 @@ end
 function Druid:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        -- Only trigger a partial scan for this unit
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    elseif event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
+    -- Removed UNIT_AURA scanning (Polling Mode)
+    
+    if event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
         -- Only trigger UI update if this is our Innervate target
         local pname = UnitName("player")
         local target = self.LegacyAssignments[pname] and self.LegacyAssignments[pname]["Innervate"]
@@ -598,8 +602,10 @@ function Druid:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then
@@ -668,11 +674,11 @@ function Druid:ClearThornsList(druidName)
 end
 
 function Druid:SaveThornsList()
-    CP_PerUser.DruidThornsList = self.ThornsList
+    ClassPower_PerUser.DruidThornsList = self.ThornsList
 end
 
 function Druid:SaveInnervateThreshold()
-    CP_PerUser.DruidInnervateThreshold = self.InnervateThreshold
+    ClassPower_PerUser.DruidInnervateThreshold = self.InnervateThreshold
 end
 
 function Druid:GetInnervateThreshold(druidName)
@@ -1150,7 +1156,7 @@ function Druid:CreateBuffBar()
         end
     end)
     
-    local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
+    local grip = ClassPower_CreateResizeGrip(f, f:GetName().."ResizeGrip")
     grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
     grip:SetScript("OnMouseUp", function()
         local p = this:GetParent()
@@ -1165,15 +1171,15 @@ function Druid:CreateBuffBar()
         row:Hide()
     end
     
-    if CP_PerUser.DruidPoint then
+    if ClassPower_PerUser.DruidPoint then
         f:ClearAllPoints()
-        f:SetPoint(CP_PerUser.DruidPoint, "UIParent", CP_PerUser.DruidRelativePoint or "CENTER", CP_PerUser.DruidX or 0, CP_PerUser.DruidY or 0)
+        f:SetPoint(ClassPower_PerUser.DruidPoint, "UIParent", ClassPower_PerUser.DruidRelativePoint or "CENTER", ClassPower_PerUser.DruidX or 0, ClassPower_PerUser.DruidY or 0)
     else
         f:SetPoint("CENTER", 0, 0)
     end
     
-    if CP_PerUser.DruidScale then
-        f:SetScale(CP_PerUser.DruidScale)
+    if ClassPower_PerUser.DruidScale then
+        f:SetScale(ClassPower_PerUser.DruidScale)
     else
         f:SetScale(0.7)
     end
@@ -1201,7 +1207,7 @@ function Druid:CreateHUDRow(parent, name, id)
     end
     
     if id <= 8 then
-        local motw = CP_CreateHUDButton(f, name.."MotW")
+        local motw = ClassPower_CreateHUDButton(f, name.."MotW")
         motw:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(motw:GetName().."Icon"):SetTexture(self.BuffIcons[0])
         motw:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
@@ -1209,14 +1215,14 @@ function Druid:CreateHUDRow(parent, name, id)
     
     if id == 9 then
         -- Thorns row - shows missing thorns from list
-        local thorns = CP_CreateHUDButton(f, name.."Thorns")
+        local thorns = ClassPower_CreateHUDButton(f, name.."Thorns")
         thorns:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(thorns:GetName().."Icon"):SetTexture(self.SpecialIcons["Thorns"])
         thorns:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
     end
     
     if id == 10 then
-        local emerald = CP_CreateHUDButton(f, name.."Emerald")
+        local emerald = ClassPower_CreateHUDButton(f, name.."Emerald")
         emerald:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(emerald:GetName().."Icon"):SetTexture(self.SpecialIcons["Emerald"])
         emerald:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
@@ -1224,7 +1230,7 @@ function Druid:CreateHUDRow(parent, name, id)
     
     if id == 11 then
         -- Innervate row - shows when target mana is below threshold
-        local innervate = CP_CreateHUDButton(f, name.."Innervate")
+        local innervate = ClassPower_CreateHUDButton(f, name.."Innervate")
         innervate:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(innervate:GetName().."Icon"):SetTexture(self.SpecialIcons["Innervate"])
         innervate:SetScript("OnClick", function() Druid:BuffButton_OnClick(this) end)
@@ -1236,11 +1242,11 @@ end
 function Druid:SaveBuffBarPosition()
     if not self.BuffBar then return end
     local point, _, relativePoint, x, y = self.BuffBar:GetPoint()
-    CP_PerUser.DruidPoint = point
-    CP_PerUser.DruidRelativePoint = relativePoint
-    CP_PerUser.DruidX = x
-    CP_PerUser.DruidY = y
-    CP_PerUser.DruidScale = self.BuffBar:GetScale()
+    ClassPower_PerUser.DruidPoint = point
+    ClassPower_PerUser.DruidRelativePoint = relativePoint
+    ClassPower_PerUser.DruidX = x
+    ClassPower_PerUser.DruidY = y
+    ClassPower_PerUser.DruidScale = self.BuffBar:GetScale()
 end
 
 function Druid:UpdateBuffBar()
@@ -1264,9 +1270,9 @@ function Druid:UpdateBuffBar()
             local btnThorns = getglobal(row:GetName().."Thorns")
             local missing, total = self:GetThornsMissing(pname)
             
-            local displayMode = CP_PerUser.BuffDisplayMode or "missing"
+            local displayMode = ClassPower_PerUser.BuffDisplayMode or "missing"
             local minTimeRemaining = self:GetThornsListMinTimeRemaining(pname)
-            local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
+            local thresholdSeconds = ((ClassPower_PerUser.TimerThresholdMinutes or 5) * 60) + (ClassPower_PerUser.TimerThresholdSeconds or 0)
             
             local shouldShow = false
             if displayMode == "always" then
@@ -1292,12 +1298,12 @@ function Druid:UpdateBuffBar()
                     -- Show timer + missing count
                     if minTimeRemaining and minTimeRemaining > 0 and missing == 0 then
                         -- All buffed, show time remaining
-                        txt:SetText(CP_FormatTime(minTimeRemaining))
+                        txt:SetText(ClassPower_FormatTime(minTimeRemaining))
                         txt:SetTextColor(0, 1, 0)
                     elseif missing > 0 then
                         -- Some missing
                         if minTimeRemaining and minTimeRemaining > 0 then
-                            txt:SetText(missing.." ("..CP_FormatTime(minTimeRemaining)..")")
+                            txt:SetText(missing.." ("..ClassPower_FormatTime(minTimeRemaining)..")")
                         else
                             txt:SetText(missing.." miss")
                         end
@@ -1367,9 +1373,9 @@ function Druid:UpdateBuffBar()
                     
                     if cooldownRemaining > 0 then
                         -- On cooldown - show dimmed with CD timer
-                        btnInn.tooltipText = "Innervate: "..target.." ("..manaPercent.."%)\nCooldown: "..CP_FormatTime(cooldownRemaining)
+                        btnInn.tooltipText = "Innervate: "..target.." ("..manaPercent.."%)\nCooldown: "..ClassPower_FormatTime(cooldownRemaining)
                         if icon then icon:SetVertexColor(0.5, 0.5, 0.5) end  -- 50% dimmed
-                        txt:SetText(CP_FormatTime(cooldownRemaining))
+                        txt:SetText(ClassPower_FormatTime(cooldownRemaining))
                         txt:SetTextColor(0.7, 0.7, 0.7)  -- Gray text for CD
                     else
                         -- Ready to cast - show normal
@@ -1402,9 +1408,9 @@ function Druid:UpdateBuffBar()
                     end
                 end
                 
-                local displayMode = CP_PerUser.BuffDisplayMode or "missing"
+                local displayMode = ClassPower_PerUser.BuffDisplayMode or "missing"
                 local minTimeRemaining = self:GetGroupMinTimeRemaining(i)
-                local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
+                local thresholdSeconds = ((ClassPower_PerUser.TimerThresholdMinutes or 5) * 60) + (ClassPower_PerUser.TimerThresholdSeconds or 0)
                 
                 local shouldShow = false
                 if displayMode == "always" then
@@ -1433,12 +1439,12 @@ function Druid:UpdateBuffBar()
                         -- Show timer + missing count
                         if minTimeRemaining and minTimeRemaining > 0 and missing == 0 then
                             -- All buffed, show time remaining
-                            txt:SetText(CP_FormatTime(minTimeRemaining))
+                            txt:SetText(ClassPower_FormatTime(minTimeRemaining))
                             txt:SetTextColor(0, 1, 0)  -- Green when all buffed
                         elseif missing > 0 then
                             -- Some missing
                             if minTimeRemaining and minTimeRemaining > 0 then
-                                txt:SetText(missing.." ("..CP_FormatTime(minTimeRemaining)..")")
+                                txt:SetText(missing.." ("..ClassPower_FormatTime(minTimeRemaining)..")")
                             else
                                 txt:SetText(missing.." miss")
                             end
@@ -1591,7 +1597,7 @@ function Druid:CreateConfigWindow()
     scaleBtn:SetScript("OnMouseUp", function()
         local p = this:GetParent()
         p.isScaling = false
-        CP_PerUser.DruidConfigScale = p:GetScale()
+        ClassPower_PerUser.DruidConfigScale = p:GetScale()
     end)
     scaleBtn:SetScript("OnUpdate", function()
         local p = this:GetParent()
@@ -1636,8 +1642,8 @@ function Druid:CreateConfigWindow()
         self:CreateConfigRow(f, i)
     end
     
-    if CP_PerUser.DruidConfigScale then
-        f:SetScale(CP_PerUser.DruidConfigScale)
+    if ClassPower_PerUser.DruidConfigScale then
+        f:SetScale(ClassPower_PerUser.DruidConfigScale)
     else
         f:SetScale(1.0)
     end
@@ -1649,7 +1655,7 @@ function Druid:CreateConfigWindow()
     settingsBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 15)
     settingsBtn:SetText("Settings...")
     settingsBtn:SetScript("OnClick", function()
-        CP_ShowSettingsPanel()
+        ClassPower_ShowSettingsPanel()
     end)
     settingsBtn:SetScript("OnEnter", function()
         GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
@@ -1728,7 +1734,7 @@ function Druid:CreateConfigRow(parent, rowIndex)
     row:SetHeight(44)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*46)
     
-    local clearBtn = CP_CreateClearButton(row, rowName.."Clear")
+    local clearBtn = ClassPower_CreateClearButton(row, rowName.."Clear")
     clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
     clearBtn:SetScript("OnClick", function() Druid:ClearButton_OnClick(this) end)
     
@@ -1745,7 +1751,7 @@ function Druid:CreateConfigRow(parent, rowIndex)
     caps:SetPoint("TOPLEFT", row, "TOPLEFT", 80, -12)
     
     local function CreateCapIcon(suffix, xOffset)
-        local btn = CP_CreateCapabilityIcon(caps, rowName.."Cap"..suffix)
+        local btn = ClassPower_CreateCapabilityIcon(caps, rowName.."Cap"..suffix)
         btn:SetWidth(16)
         btn:SetHeight(16)
         local icon = getglobal(btn:GetName().."Icon")
@@ -2221,15 +2227,15 @@ function Druid:BuffButton_OnClick(btn)
             spellName = self.Spells.MOTW  -- Fall back to Mark if Gift not learned
         end
         
-        CP_Debug("Druid BuffButton: hasGift="..tostring(hasGift)..", spell="..tostring(spellName)..", group="..gid)
+        ClassPower_Debug("Druid BuffButton: hasGift="..tostring(hasGift)..", spell="..tostring(spellName)..", group="..gid)
         
         if self.CurrentBuffs[gid] then
-            CP_Debug("Group "..gid.." has data, checking members...")
+            ClassPower_Debug("Group "..gid.." has data, checking members...")
             
             -- For Gift (left-click): target anyone visible and alive in range
             -- For Mark (right-click): target someone missing the buff
             for _, member in self.CurrentBuffs[gid] do
-                CP_Debug("  Checking: "..member.name..", hasMotW="..tostring(member.hasMotW)..", visible="..tostring(member.visible)..", dead="..tostring(member.dead))
+                ClassPower_Debug("  Checking: "..member.name..", hasMotW="..tostring(member.hasMotW)..", visible="..tostring(member.visible)..", dead="..tostring(member.dead))
                 
                 -- For Mark (right-click), skip if they already have the buff
                 -- For Gift (left-click), we can target anyone
@@ -2243,7 +2249,7 @@ function Druid:BuffButton_OnClick(btn)
                     TargetByName(member.name, true)
                     if UnitExists("target") and UnitName("target") == member.name then
                         if CheckInteractDistance("target", 4) then
-                            CP_Debug("Casting "..spellName.." on "..member.name)
+                            ClassPower_Debug("Casting "..spellName.." on "..member.name)
                             CastSpellByName(spellName)
                             TargetLastTarget()
                             
@@ -2261,19 +2267,19 @@ function Druid:BuffButton_OnClick(btn)
                             return
                         else
                             -- Out of range, restore target and try next
-                            CP_Debug(member.name.." out of range")
+                            ClassPower_Debug(member.name.." out of range")
                             TargetLastTarget()
                         end
                     else
                         -- Couldn't target, restore and try next
-                        CP_Debug("Could not target "..member.name)
+                        ClassPower_Debug("Could not target "..member.name)
                         TargetLastTarget()
                     end
                 end
             end
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: No targets in range for Group "..gid)
         else
-            CP_Debug("No buff data for group "..gid)
+            ClassPower_Debug("No buff data for group "..gid)
         end
     end
 end
@@ -2463,12 +2469,12 @@ function Druid:UpdateLeaderButtons()
 end
 
 function Druid:ResetUI()
-    CP_PerUser.DruidPoint = nil
-    CP_PerUser.DruidRelativePoint = nil
-    CP_PerUser.DruidX = nil
-    CP_PerUser.DruidY = nil
-    CP_PerUser.DruidScale = 0.7
-    CP_PerUser.DruidConfigScale = 1.0
+    ClassPower_PerUser.DruidPoint = nil
+    ClassPower_PerUser.DruidRelativePoint = nil
+    ClassPower_PerUser.DruidX = nil
+    ClassPower_PerUser.DruidY = nil
+    ClassPower_PerUser.DruidScale = 0.7
+    ClassPower_PerUser.DruidConfigScale = 1.0
     
     if self.BuffBar then
         self.BuffBar:ClearAllPoints()
@@ -2666,22 +2672,22 @@ function Druid:SaveAssignments()
     if not pname then return end
     
     -- Initialize saved variable if needed
-    if not CP_DruidAssignments then
-        CP_DruidAssignments = {}
+    if not ClassPower_DruidAssignments then
+        ClassPower_DruidAssignments = {}
     end
     
     -- Save current player's group assignments (1-8)
-    CP_DruidAssignments.Assignments = self.Assignments[pname] or {}
+    ClassPower_DruidAssignments.Assignments = self.Assignments[pname] or {}
     
     -- Save Innervate target
     local legacyData = self.LegacyAssignments[pname]
     if legacyData and legacyData["Innervate"] then
-        CP_DruidAssignments.InnervateTarget = legacyData["Innervate"]
+        ClassPower_DruidAssignments.InnervateTarget = legacyData["Innervate"]
     else
-        CP_DruidAssignments.InnervateTarget = nil
+        ClassPower_DruidAssignments.InnervateTarget = nil
     end
     
-    CP_Debug("Druid: Saved assignments for "..pname)
+    ClassPower_Debug("Druid: Saved assignments for "..pname)
 end
 
 function Druid:LoadAssignments()
@@ -2689,28 +2695,28 @@ function Druid:LoadAssignments()
     if not pname then return end
     
     -- Check if we have saved data
-    if not CP_DruidAssignments then
-        CP_Debug("Druid: No saved assignments found")
+    if not ClassPower_DruidAssignments then
+        ClassPower_Debug("Druid: No saved assignments found")
         return
     end
     
     -- Load group assignments (1-8)
-    if CP_DruidAssignments.Assignments then
+    if ClassPower_DruidAssignments.Assignments then
         self.Assignments[pname] = {}
         for grp = 1, 8 do
-            local val = CP_DruidAssignments.Assignments[grp]
+            local val = ClassPower_DruidAssignments.Assignments[grp]
             if val ~= nil then
                 self.Assignments[pname][grp] = val
             end
         end
-        CP_Debug("Druid: Loaded group assignments")
+        ClassPower_Debug("Druid: Loaded group assignments")
     end
     
     -- Load Innervate target
-    if CP_DruidAssignments.InnervateTarget then
+    if ClassPower_DruidAssignments.InnervateTarget then
         self.LegacyAssignments[pname] = self.LegacyAssignments[pname] or {}
-        self.LegacyAssignments[pname]["Innervate"] = CP_DruidAssignments.InnervateTarget
-        CP_Debug("Druid: Loaded Innervate target: "..CP_DruidAssignments.InnervateTarget)
+        self.LegacyAssignments[pname]["Innervate"] = ClassPower_DruidAssignments.InnervateTarget
+        ClassPower_Debug("Druid: Loaded Innervate target: "..ClassPower_DruidAssignments.InnervateTarget)
     end
 end
 

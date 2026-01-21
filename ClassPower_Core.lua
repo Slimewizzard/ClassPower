@@ -9,7 +9,7 @@ ClassPower.loadedModules = {}  -- Track which modules have been initialized (laz
 ClassPower.version = "2.0"
 
 -- Saved Variables (Renamed from PriestPower)
-CP_PerUser = CP_PerUser or {}
+ClassPower_PerUser = ClassPower_PerUser or {}
 ClassPower_TankList = ClassPower_TankList or {} -- List of {name="Name", role="MT", mark=1}
 
 -- Global reference
@@ -31,13 +31,13 @@ ClassPower.SyncTimer = 0 -- Throttling timer
 ClassPower.SyncDirty = false -- Flag for pending broadcast
 
 -- Prefix for addon messages
-CP_PREFIX = "CLPWR"
+ClassPower_PREFIX = "CLPWR"
 
 -- Debug
-CP_DebugEnabled = false
+ClassPower_DebugEnabled = false
 
-function CP_Debug(msg)
-    if CP_DebugEnabled then
+function ClassPower_Debug(msg)
+    if ClassPower_DebugEnabled then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[CP Debug]|r "..tostring(msg))
     end
 end
@@ -48,7 +48,7 @@ end
 
 function ClassPower:RegisterModule(classToken, module)
     self.modules[classToken] = module
-    CP_Debug("Registered module for: "..classToken)
+    ClassPower_Debug("Registered module for: "..classToken)
 end
 
 function ClassPower:GetModule(classToken)
@@ -83,7 +83,7 @@ function ClassPower:EnsureModuleLoaded(classToken)
     if not module then return false end
     
     if module.OnLoad then
-        CP_Debug("Lazy loading module: "..classToken)
+        ClassPower_Debug("Lazy loading module: "..classToken)
         module:OnLoad()
     end
     self.loadedModules[classToken] = true
@@ -195,9 +195,9 @@ end
 
 function ClassPower_SendMessage(msg)
     if GetNumRaidMembers() > 0 then
-        SendAddonMessage(CP_PREFIX, msg, "RAID")
+        SendAddonMessage(ClassPower_PREFIX, msg, "RAID")
     elseif GetNumPartyMembers() > 0 then
-        SendAddonMessage(CP_PREFIX, msg, "PARTY")
+        SendAddonMessage(ClassPower_PREFIX, msg, "PARTY")
     end
 end
 
@@ -209,7 +209,7 @@ end
 -- UI Constructor Functions (Reusable)
 -----------------------------------------------------------------------------------
 
-function CP_CreateSubButton(parent, name)
+function ClassPower_CreateSubButton(parent, name)
     local btn = CreateFrame("Button", name, parent)
     btn:SetWidth(24); btn:SetHeight(24)
     
@@ -230,7 +230,7 @@ function CP_CreateSubButton(parent, name)
     return btn
 end
 
-function CP_CreateCapabilityIcon(parent, name)
+function ClassPower_CreateCapabilityIcon(parent, name)
     local btn = CreateFrame("Button", name, parent)
     btn:SetWidth(18); btn:SetHeight(18)
     
@@ -253,7 +253,7 @@ function CP_CreateCapabilityIcon(parent, name)
     return btn
 end
 
-function CP_CreateClearButton(parent, name)
+function ClassPower_CreateClearButton(parent, name)
     local btn = CreateFrame("Button", name, parent)
     btn:SetWidth(14); btn:SetHeight(14)
     btn:SetNormalTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
@@ -273,7 +273,7 @@ function CP_CreateClearButton(parent, name)
     return btn
 end
 
-function CP_CreateResizeGrip(parent, name)
+function ClassPower_CreateResizeGrip(parent, name)
     local btn = CreateFrame("Button", name, parent)
     btn:SetWidth(16); btn:SetHeight(16)
     
@@ -283,7 +283,7 @@ function CP_CreateResizeGrip(parent, name)
             p.isResizing = true
             p.startScale = p:GetScale()
             p.cursorStartX, p.cursorStartY = GetCursorPosition()
-            this:SetScript("OnUpdate", CP_OnScaleUpdate)
+            this:SetScript("OnUpdate", ClassPower_OnScaleUpdate)
         end
     end)
     btn:SetScript("OnMouseUp", function() 
@@ -294,7 +294,7 @@ function CP_CreateResizeGrip(parent, name)
     return btn
 end
 
-function CP_OnScaleUpdate()
+function ClassPower_OnScaleUpdate()
     local p = this:GetParent()
     if not p.isResizing then return end
     
@@ -309,7 +309,7 @@ function CP_OnScaleUpdate()
     p:SetScale(newScale)
 end
 
-function CP_CreateHUDButton(parent, name)
+function ClassPower_CreateHUDButton(parent, name)
     local btn = CreateFrame("Button", name, parent)
     btn:SetWidth(30); btn:SetHeight(30)
     
@@ -350,10 +350,10 @@ end
 function ClassPower_OnEvent(event)
     if event == "PLAYER_LOGIN" then
         -- Initialize saved vars
-        if not CP_PerUser then
-            CP_PerUser = {}
+        if not ClassPower_PerUser then
+            ClassPower_PerUser = {}
             for k, v in pairs(DEFAULT_CONFIG) do
-                CP_PerUser[k] = v
+                ClassPower_PerUser[k] = v
             end
         end
         
@@ -361,7 +361,7 @@ function ClassPower_OnEvent(event)
         ClassPower:LoadActiveModule()
         
     elseif event == "CHAT_MSG_ADDON" then
-        if arg1 == CP_PREFIX then
+        if arg1 == ClassPower_PREFIX then
             if string.find(arg2, "^TANKSYNC") then
                 ClassPower:OnTankSync(arg2)
             end
@@ -374,6 +374,12 @@ function ClassPower_OnEvent(event)
                         module:OnAddonMessage(arg4, arg2)
                     end
                 end
+            end
+            
+        elseif arg1 == "PLPWR" then
+            -- PallyPower message: Route to active module if it handles it
+             if ClassPower.activeModule and ClassPower.activeModule.OnPallyPowerMessage then
+                ClassPower.activeModule:OnPallyPowerMessage(arg4, arg2, arg3) -- sender, msg, channel
             end
         end
     elseif event == "UNIT_AURA" or event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
@@ -409,18 +415,24 @@ function ClassPower_OnUpdate(elapsed)
         end
     end
     
-    -- Also check other loaded modules with visible config windows (for admin panel)
-    for classToken, loaded in pairs(ClassPower.loadedModules) do
-        if loaded then
-            local module = ClassPower.modules[classToken]
-            -- Skip the active module (already handled above)
-            if module and module ~= ClassPower.activeModule then
-                -- If this module has a visible config window and UIDirty is set, update it
-                if module.ConfigWindow and module.ConfigWindow:IsVisible() then
-                    if module.UIDirty then
-                        module.UIDirty = false
-                        if module.UpdateConfigGrid then
-                            module:UpdateConfigGrid()
+    -- Global UI Throttle for background modules
+    ClassPower.UIThrottle = (ClassPower.UIThrottle or 0) - elapsed
+    if ClassPower.UIThrottle <= 0 then
+        ClassPower.UIThrottle = 1.0 -- 1fps update for background windows
+        
+        -- Also check other loaded modules with visible config windows (for admin panel)
+        for classToken, loaded in pairs(ClassPower.loadedModules) do
+            if loaded then
+                local module = ClassPower.modules[classToken]
+                -- Skip the active module (handled by its own OnUpdate)
+                if module and module ~= ClassPower.activeModule then
+                    -- If this module has a visible config window and UIDirty is set, update it
+                    if module.ConfigWindow and module.ConfigWindow:IsVisible() then
+                        if module.UIDirty then
+                            module.UIDirty = false
+                            if module.UpdateConfigGrid then
+                                module:UpdateConfigGrid()
+                            end
                         end
                     end
                 end
@@ -444,6 +456,12 @@ eventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("UNIT_MANA")
 eventFrame:RegisterEvent("UNIT_MAXMANA")
+
+-- Register prefix for ClassPower and PallyPower
+if RegisterAddonMessagePrefix then
+    RegisterAddonMessagePrefix(ClassPower_PREFIX)
+    RegisterAddonMessagePrefix("PLPWR") -- For PallyPower compatibility
+end
 
 eventFrame:SetScript("OnEvent", function() ClassPower_OnEvent(event) end)
 eventFrame:SetScript("OnUpdate", function() ClassPower_OnUpdate(arg1) end)
@@ -482,7 +500,7 @@ function ClassPower_CreateMinimapButton()
     
     -- Icon
     local icon = btn:CreateTexture(btn:GetName().."Icon", "BACKGROUND")
-    icon:SetTexture("Interface\\AddOns\\PriestPower\\Media\\cpwr")
+    icon:SetTexture("Interface\\AddOns\\ClassPower\\Media\\cpwr")
     icon:SetWidth(20)
     icon:SetHeight(20)
     icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
@@ -509,11 +527,11 @@ function ClassPower_CreateMinimapButton()
         local y = math.sin(math.rad(angle)) * radius
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
-        CP_PerUser.MinimapAngle = angle
+        ClassPower_PerUser.MinimapAngle = angle
     end
     
     -- Load saved position or default to top-right
-    local savedAngle = CP_PerUser and CP_PerUser.MinimapAngle or 45
+    local savedAngle = ClassPower_PerUser and ClassPower_PerUser.MinimapAngle or 45
     UpdatePosition(savedAngle)
     
     -- Dragging
@@ -583,7 +601,7 @@ end)
 -- Time Formatting Helper
 -----------------------------------------------------------------------------------
 
-function CP_FormatTime(seconds)
+function ClassPower_FormatTime(seconds)
     if not seconds or seconds <= 0 then return "" end
     local m = math.floor(seconds / 60)
     local s = math.floor(seconds) - (m * 60)
@@ -594,10 +612,10 @@ end
 -- Shared Settings Panel
 -----------------------------------------------------------------------------------
 
-local CP_SettingsPanel = nil
+local ClassPower_SettingsPanel = nil
 
-function CP_CreateSettingsPanel()
-    if CP_SettingsPanel then return CP_SettingsPanel end
+function ClassPower_CreateSettingsPanel()
+    if ClassPower_SettingsPanel then return ClassPower_SettingsPanel end
     
     local f = CreateFrame("Frame", "ClassPowerSettingsPanel", UIParent)
     f:SetWidth(280)
@@ -660,8 +678,8 @@ function CP_CreateSettingsPanel()
         
         btn.value = mode.value
         btn:SetScript("OnClick", function()
-            CP_PerUser.BuffDisplayMode = this.value
-            CP_UpdateSettingsPanel()
+            ClassPower_PerUser.BuffDisplayMode = this.value
+            ClassPower_UpdateSettingsPanel()
             if ClassPower.activeModule and ClassPower.activeModule.UIDirty ~= nil then
                 ClassPower.activeModule.UIDirty = true
             end
@@ -682,7 +700,7 @@ function CP_CreateSettingsPanel()
     minSlider:SetPoint("TOPLEFT", f, "TOPLEFT", 25, -160)
     minSlider:SetMinMaxValues(0, 30)
     minSlider:SetValueStep(1)
-    minSlider:SetValue(CP_PerUser.TimerThresholdMinutes or 5)
+    minSlider:SetValue(ClassPower_PerUser.TimerThresholdMinutes or 5)
     
     getglobal(minSlider:GetName().."Low"):SetText("0m")
     getglobal(minSlider:GetName().."High"):SetText("30m")
@@ -690,11 +708,11 @@ function CP_CreateSettingsPanel()
     
     local minValue = f:CreateFontString("CPSettingsMinutesValue", "OVERLAY", "GameFontHighlightSmall")
     minValue:SetPoint("TOP", minSlider, "BOTTOM", 0, -2)
-    minValue:SetText((CP_PerUser.TimerThresholdMinutes or 5).."m")
+    minValue:SetText((ClassPower_PerUser.TimerThresholdMinutes or 5).."m")
     
     minSlider:SetScript("OnValueChanged", function()
         local val = math.floor(this:GetValue())
-        CP_PerUser.TimerThresholdMinutes = val
+        ClassPower_PerUser.TimerThresholdMinutes = val
         getglobal("CPSettingsMinutesValue"):SetText(val.."m")
     end)
     
@@ -705,7 +723,7 @@ function CP_CreateSettingsPanel()
     secSlider:SetPoint("TOPLEFT", minSlider, "TOPRIGHT", 30, 0)
     secSlider:SetMinMaxValues(0, 59)
     secSlider:SetValueStep(5)
-    secSlider:SetValue(CP_PerUser.TimerThresholdSeconds or 0)
+    secSlider:SetValue(ClassPower_PerUser.TimerThresholdSeconds or 0)
     
     getglobal(secSlider:GetName().."Low"):SetText("0s")
     getglobal(secSlider:GetName().."High"):SetText("59s")
@@ -713,23 +731,23 @@ function CP_CreateSettingsPanel()
     
     local secValue = f:CreateFontString("CPSettingsSecondsValue", "OVERLAY", "GameFontHighlightSmall")
     secValue:SetPoint("TOP", secSlider, "BOTTOM", 0, -2)
-    secValue:SetText((CP_PerUser.TimerThresholdSeconds or 0).."s")
+    secValue:SetText((ClassPower_PerUser.TimerThresholdSeconds or 0).."s")
     
     secSlider:SetScript("OnValueChanged", function()
         local val = math.floor(this:GetValue())
-        CP_PerUser.TimerThresholdSeconds = val
+        ClassPower_PerUser.TimerThresholdSeconds = val
         getglobal("CPSettingsSecondsValue"):SetText(val.."s")
     end)
     
     f:Hide()
-    CP_SettingsPanel = f
+    ClassPower_SettingsPanel = f
     return f
 end
 
-function CP_UpdateSettingsPanel()
-    if not CP_SettingsPanel then return end
+function ClassPower_UpdateSettingsPanel()
+    if not ClassPower_SettingsPanel then return end
     
-    local mode = CP_PerUser.BuffDisplayMode or "missing"
+    local mode = ClassPower_PerUser.BuffDisplayMode or "missing"
     
     for i = 1, 3 do
         local btn = getglobal("CPSettingsMode"..i)
@@ -741,43 +759,43 @@ function CP_UpdateSettingsPanel()
     -- Note: Sliders don't have Enable/Disable in 1.12.1, they stay enabled
 end
 
-function CP_ToggleSettingsPanel()
-    CP_CreateSettingsPanel()
+function ClassPower_ToggleSettingsPanel()
+    ClassPower_CreateSettingsPanel()
     
-    if CP_SettingsPanel:IsVisible() then
-        CP_SettingsPanel:Hide()
+    if ClassPower_SettingsPanel:IsVisible() then
+        ClassPower_SettingsPanel:Hide()
     else
         -- Update values from saved vars
         local minSlider = getglobal("CPSettingsMinutes")
         local secSlider = getglobal("CPSettingsSeconds")
         
         if minSlider then
-            minSlider:SetValue(CP_PerUser.TimerThresholdMinutes or 5)
+            minSlider:SetValue(ClassPower_PerUser.TimerThresholdMinutes or 5)
         end
         if secSlider then
-            secSlider:SetValue(CP_PerUser.TimerThresholdSeconds or 0)
+            secSlider:SetValue(ClassPower_PerUser.TimerThresholdSeconds or 0)
         end
         
-        CP_UpdateSettingsPanel()
-        CP_SettingsPanel:Show()
+        ClassPower_UpdateSettingsPanel()
+        ClassPower_SettingsPanel:Show()
     end
 end
 
-function CP_ShowSettingsPanel()
-    CP_CreateSettingsPanel()
+function ClassPower_ShowSettingsPanel()
+    ClassPower_CreateSettingsPanel()
     
     local minSlider = getglobal("CPSettingsMinutes")
     local secSlider = getglobal("CPSettingsSeconds")
     
     if minSlider then
-        minSlider:SetValue(CP_PerUser.TimerThresholdMinutes or 5)
+        minSlider:SetValue(ClassPower_PerUser.TimerThresholdMinutes or 5)
     end
     if secSlider then
-        secSlider:SetValue(CP_PerUser.TimerThresholdSeconds or 0)
+        secSlider:SetValue(ClassPower_PerUser.TimerThresholdSeconds or 0)
     end
     
-    CP_UpdateSettingsPanel()
-    CP_SettingsPanel:Show()
+    ClassPower_UpdateSettingsPanel()
+    ClassPower_SettingsPanel:Show()
 end
 
 -----------------------------------------------------------------------------------
@@ -1382,11 +1400,11 @@ function ClassPower_SlashHandler(msg)
         end
         
     elseif cmd == "debug" then
-        if CP_PerUser.Debug then
-            CP_PerUser.Debug = false
+        if ClassPower_PerUser.Debug then
+            ClassPower_PerUser.Debug = false
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode disabled.")
         else
-            CP_PerUser.Debug = true
+            ClassPower_PerUser.Debug = true
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Debug mode enabled.")
         end
         
@@ -1468,5 +1486,5 @@ function ClassPower:OnTankSync(msg)
     end
 end
 
-CP_Debug("ClassPower Core loaded.")
+ClassPower_Debug("ClassPower Core loaded.")
 

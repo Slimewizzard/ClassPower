@@ -151,7 +151,7 @@ Priest.AssignMode = "Champ"
 -----------------------------------------------------------------------------------
 
 function Priest:OnLoad()
-    CP_Debug("Priest:OnLoad()")
+    ClassPower_Debug("Priest:OnLoad()")
     
     -- Load saved assignments first
     self:LoadAssignments()
@@ -179,18 +179,18 @@ end
 
 function Priest:MigrateSavedVars()
     -- Migrate from old PriestPower saved vars
-    if PriestPower_Assignments then
-        self.Assignments = PriestPower_Assignments
+    if ClassPower_Assignments then
+        self.Assignments = ClassPower_Assignments
     end
-    if PriestPower_LegacyAssignments then
-        self.LegacyAssignments = PriestPower_LegacyAssignments
+    if ClassPower_LegacyAssignments then
+        self.LegacyAssignments = ClassPower_LegacyAssignments
     end
     if PP_BuffTimers then
         self.BuffTimers = PP_BuffTimers
     end
     if PP_PerUser then
         for k, v in pairs(PP_PerUser) do
-            CP_PerUser[k] = v
+            ClassPower_PerUser[k] = v
         end
     end
 end
@@ -246,10 +246,23 @@ function Priest:OnUpdate(elapsed)
         end
     end
     
-    -- UI refresh (1s interval if timers shown, else 5s)
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
+    end
+    
+    -- Periodic full scan/refresh (keep timers optimized)
     self.UpdateTimer = self.UpdateTimer - elapsed
     if self.UpdateTimer <= 0 then
-        local displayMode = CP_PerUser.BuffDisplayMode
+        local displayMode = ClassPower_PerUser.BuffDisplayMode
         if displayMode == "always" or displayMode == "timer" then
             self.UpdateTimer = 1.0
         else
@@ -269,13 +282,6 @@ function Priest:OnUpdate(elapsed)
             self:ScanRaid()
             self:UpdateUI()
         end
-    -- Also update immediately if dirty flag is set and UI is visible
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
-            self:UpdateUI()
-        end
     end
     
     -- Background distributed scanning
@@ -289,11 +295,7 @@ end
 function Priest:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        -- Only trigger a partial scan for this unit
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    end
+    -- Removed UNIT_AURA scanning (Polling Mode)
 end
 
 function Priest:OnSlashCommand(msg)
@@ -602,8 +604,10 @@ function Priest:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then
@@ -940,7 +944,7 @@ function Priest:CreateBuffBar()
         end
     end)
     
-    local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
+    local grip = ClassPower_CreateResizeGrip(f, f:GetName().."ResizeGrip")
     grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
     grip:SetScript("OnMouseUp", function()
         local p = this:GetParent()
@@ -954,15 +958,15 @@ function Priest:CreateBuffBar()
         row:Hide()
     end
     
-    if CP_PerUser.Point then
+    if ClassPower_PerUser.Point then
         f:ClearAllPoints()
-        f:SetPoint(CP_PerUser.Point, "UIParent", CP_PerUser.RelativePoint or "CENTER", CP_PerUser.X or 0, CP_PerUser.Y or 0)
+        f:SetPoint(ClassPower_PerUser.Point, "UIParent", ClassPower_PerUser.RelativePoint or "CENTER", ClassPower_PerUser.X or 0, ClassPower_PerUser.Y or 0)
     else
         f:SetPoint("CENTER", 0, 0)
     end
     
-    if CP_PerUser.Scale then
-        f:SetScale(CP_PerUser.Scale)
+    if ClassPower_PerUser.Scale then
+        f:SetScale(ClassPower_PerUser.Scale)
     else
         f:SetScale(0.7)
     end
@@ -987,43 +991,43 @@ function Priest:CreateHUDRow(parent, name, id)
     end
     
     if id <= 8 then
-        local fort = CP_CreateHUDButton(f, name.."Fort")
+        local fort = ClassPower_CreateHUDButton(f, name.."Fort")
         fort:SetPoint("LEFT", f, "LEFT", 40, 0)
         fort:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
-        local spirit = CP_CreateHUDButton(f, name.."Spirit")
+        local spirit = ClassPower_CreateHUDButton(f, name.."Spirit")
         spirit:SetPoint("LEFT", fort, "RIGHT", 4, 0)
         spirit:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
-        local shadow = CP_CreateHUDButton(f, name.."Shadow")
+        local shadow = ClassPower_CreateHUDButton(f, name.."Shadow")
         shadow:SetPoint("LEFT", spirit, "RIGHT", 4, 0)
         shadow:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
     end
     
     if id == 9 then
-        local proc = CP_CreateHUDButton(f, name.."Proclaim")
+        local proc = ClassPower_CreateHUDButton(f, name.."Proclaim")
         proc:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(proc:GetName().."Icon"):SetTexture(self.ChampionIcons["Proclaim"])
         proc:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
-        local grace = CP_CreateHUDButton(f, name.."Grace")
+        local grace = ClassPower_CreateHUDButton(f, name.."Grace")
         grace:SetPoint("LEFT", proc, "RIGHT", 4, 0)
         getglobal(grace:GetName().."Icon"):SetTexture(self.ChampionIcons["Grace"])
         grace:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
-        local emp = CP_CreateHUDButton(f, name.."Empower")
+        local emp = ClassPower_CreateHUDButton(f, name.."Empower")
         emp:SetPoint("LEFT", grace, "RIGHT", 4, 0)
         getglobal(emp:GetName().."Icon"):SetTexture(self.ChampionIcons["Empower"])
         emp:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
         
-        local rev = CP_CreateHUDButton(f, name.."Revive")
+        local rev = ClassPower_CreateHUDButton(f, name.."Revive")
         rev:SetPoint("LEFT", emp, "RIGHT", 4, 0)
         getglobal(rev:GetName().."Icon"):SetTexture(self.ChampionIcons["Revive"])
         rev:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
     end
     
     if id == 10 then
-        local en = CP_CreateHUDButton(f, name.."Enlighten")
+        local en = ClassPower_CreateHUDButton(f, name.."Enlighten")
         en:SetPoint("LEFT", f, "LEFT", 40, 0)
         getglobal(en:GetName().."Icon"):SetTexture(self.ChampionIcons["Enlighten"])
         en:SetScript("OnClick", function() Priest:BuffButton_OnClick(this) end)
@@ -1035,11 +1039,11 @@ end
 function Priest:SaveBuffBarPosition()
     if not self.BuffBar then return end
     local point, _, relativePoint, x, y = self.BuffBar:GetPoint()
-    CP_PerUser.Point = point
-    CP_PerUser.RelativePoint = relativePoint
-    CP_PerUser.X = x
-    CP_PerUser.Y = y
-    CP_PerUser.Scale = self.BuffBar:GetScale()
+    ClassPower_PerUser.Point = point
+    ClassPower_PerUser.RelativePoint = relativePoint
+    ClassPower_PerUser.X = x
+    ClassPower_PerUser.Y = y
+    ClassPower_PerUser.Scale = self.BuffBar:GetScale()
 end
 
 function Priest:UpdateBuffBar()
@@ -1052,8 +1056,8 @@ function Priest:UpdateBuffBar()
     local maxRowWidth = 145 -- Minimum width
     local lastRow = nil
     
-    local displayMode = CP_PerUser.BuffDisplayMode or "missing"
-    local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
+    local displayMode = ClassPower_PerUser.BuffDisplayMode or "missing"
+    local thresholdSeconds = ((ClassPower_PerUser.TimerThresholdMinutes or 5) * 60) + (ClassPower_PerUser.TimerThresholdSeconds or 0)
     
     local BUTTON_SIZE = 30  -- Button width/height
     -- Dynamic column width based on display mode:
@@ -1100,11 +1104,11 @@ function Priest:UpdateBuffBar()
                 -- Display format
                 if displayMode == "always" or displayMode == "timer" then
                     if minTime and minTime > 0 and missingCount == 0 then
-                         txt:SetText(CP_FormatTime(minTime))
+                         txt:SetText(ClassPower_FormatTime(minTime))
                          txt:SetTextColor(0, 1, 0)
                     elseif missingCount > 0 then
                         if minTime and minTime > 0 then
-                            txt:SetText(missingCount.." ("..CP_FormatTime(minTime)..")")
+                            txt:SetText(missingCount.." ("..ClassPower_FormatTime(minTime)..")")
                         else
                              txt:SetText(missingCount.."/"..totalCount)
                         end
@@ -1331,7 +1335,7 @@ function Priest:CreateConfigWindow()
     scaleBtn:SetScript("OnMouseUp", function()
         local p = this:GetParent()
         p.isScaling = false
-        CP_PerUser.ConfigScale = p:GetScale()
+        ClassPower_PerUser.ConfigScale = p:GetScale()
     end)
     scaleBtn:SetScript("OnUpdate", function()
         local p = this:GetParent()
@@ -1372,8 +1376,8 @@ function Priest:CreateConfigWindow()
         self:CreateConfigRow(f, i)
     end
     
-    if CP_PerUser.ConfigScale then
-        f:SetScale(CP_PerUser.ConfigScale)
+    if ClassPower_PerUser.ConfigScale then
+        f:SetScale(ClassPower_PerUser.ConfigScale)
     else
         f:SetScale(1.0)
     end
@@ -1385,7 +1389,7 @@ function Priest:CreateConfigWindow()
     btnSettings:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 15)
     btnSettings:SetText("Settings...")
     btnSettings:SetScript("OnClick", function()
-        CP_ShowSettingsPanel()
+        ClassPower_ShowSettingsPanel()
     end)
     
     -- Auto-Assign button (only visible for leaders/assists)
@@ -1454,7 +1458,7 @@ function Priest:CreateConfigRow(parent, rowIndex)
     row:SetHeight(44)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*46)
     
-    local clearBtn = CP_CreateClearButton(row, rowName.."Clear")
+    local clearBtn = ClassPower_CreateClearButton(row, rowName.."Clear")
     clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -14)
     clearBtn:SetScript("OnClick", function() Priest:ClearButton_OnClick(this) end)
     
@@ -1471,7 +1475,7 @@ function Priest:CreateConfigRow(parent, rowIndex)
     caps:SetPoint("TOPLEFT", row, "TOPLEFT", 80, -12)
     
     local function CreateCapIcon(suffix, xOffset)
-        local btn = CP_CreateCapabilityIcon(caps, rowName.."Cap"..suffix)
+        local btn = ClassPower_CreateCapabilityIcon(caps, rowName.."Cap"..suffix)
         btn:SetWidth(16)
         btn:SetHeight(16)
         local icon = getglobal(btn:GetName().."Icon")
@@ -2115,12 +2119,12 @@ function Priest:UpdateLeaderButtons()
 end
 
 function Priest:ResetUI()
-    CP_PerUser.Point = nil
-    CP_PerUser.RelativePoint = nil
-    CP_PerUser.X = nil
-    CP_PerUser.Y = nil
-    CP_PerUser.Scale = 0.7
-    CP_PerUser.ConfigScale = 1.0
+    ClassPower_PerUser.Point = nil
+    ClassPower_PerUser.RelativePoint = nil
+    ClassPower_PerUser.X = nil
+    ClassPower_PerUser.Y = nil
+    ClassPower_PerUser.Scale = 0.7
+    ClassPower_PerUser.ConfigScale = 1.0
     
     if self.BuffBar then
         self.BuffBar:ClearAllPoints()
@@ -2237,33 +2241,33 @@ end
 function Priest:SaveAssignments()
     -- Save all assignments (not just current player) for convenience
     -- This allows raid leaders to set up assignments for everyone
-    PriestPower_Assignments = self.Assignments
-    PriestPower_LegacyAssignments = self.LegacyAssignments
+    ClassPower_Assignments = self.Assignments
+    ClassPower_LegacyAssignments = self.LegacyAssignments
     
     -- Debug output
     for pname, assigns in pairs(self.Assignments) do
         for grp, val in pairs(assigns) do
-            CP_Debug("Priest Save: "..pname.." G"..grp.." = "..tostring(val))
+            ClassPower_Debug("Priest Save: "..pname.." G"..grp.." = "..tostring(val))
         end
     end
-    CP_Debug("Priest: Saved assignments")
+    ClassPower_Debug("Priest: Saved assignments")
 end
 
 function Priest:LoadAssignments()
     -- Load saved assignments
-    if PriestPower_Assignments then
-        self.Assignments = PriestPower_Assignments
+    if ClassPower_Assignments then
+        self.Assignments = ClassPower_Assignments
         -- Debug output
         for pname, assigns in pairs(self.Assignments) do
             for grp, val in pairs(assigns) do
-                CP_Debug("Priest Load: "..pname.." G"..grp.." = "..tostring(val))
+                ClassPower_Debug("Priest Load: "..pname.." G"..grp.." = "..tostring(val))
             end
         end
-        CP_Debug("Priest: Loaded group assignments")
+        ClassPower_Debug("Priest: Loaded group assignments")
     end
-    if PriestPower_LegacyAssignments then
-        self.LegacyAssignments = PriestPower_LegacyAssignments
-        CP_Debug("Priest: Loaded champion assignments")
+    if ClassPower_LegacyAssignments then
+        self.LegacyAssignments = ClassPower_LegacyAssignments
+        ClassPower_Debug("Priest: Loaded champion assignments")
     end
 end
 

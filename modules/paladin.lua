@@ -213,7 +213,7 @@ Paladin.ContextClass = nil
 -----------------------------------------------------------------------------------
 
 function Paladin:OnLoad()
-    CP_Debug("Paladin:OnLoad()")
+    ClassPower_Debug("Paladin:OnLoad()")
     
     -- Load saved assignments before anything else
     self:LoadAssignments()
@@ -283,10 +283,7 @@ end
 function Paladin:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    end
+    -- Removed UNIT_AURA scanning (Polling Mode)
 end
 
 function Paladin:OnEvent(event)
@@ -340,10 +337,23 @@ function Paladin:OnUpdate(elapsed)
         end
     end
     
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
+    end
+    
     -- UI refresh (1s interval if timers shown, else 5s)
     self.UpdateTimer = self.UpdateTimer - elapsed
     if self.UpdateTimer <= 0 then
-        local displayMode = CP_PerUser.BuffDisplayMode
+        local displayMode = ClassPower_PerUser.BuffDisplayMode
         if displayMode == "always" or displayMode == "timer" then
             self.UpdateTimer = 1.0
         else
@@ -360,12 +370,6 @@ function Paladin:OnUpdate(elapsed)
         
         if needsScan then
             self:ScanRaid()
-            self:UpdateUI()
-        end
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
             self:UpdateUI()
         end
     end
@@ -486,10 +490,10 @@ function Paladin:ScanSpells()
     self.RankInfo = info
     
     -- Debug: Show what blessings were found
-    CP_Debug("Paladin:ScanSpells() found:")
+    ClassPower_Debug("Paladin:ScanSpells() found:")
     for id = 0, 5 do
         if info[id] then
-            CP_Debug("  Blessing "..id.." ("..self.Blessings[id].short.."): rank "..info[id].rank..", greater="..(info[id].hasGreater and "yes" or "no"))
+            ClassPower_Debug("  Blessing "..id.." ("..self.Blessings[id].short.."): rank "..info[id].rank..", greater="..(info[id].hasGreater and "yes" or "no"))
         end
     end
     
@@ -674,12 +678,22 @@ function Paladin:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then
-                self:ScanUnit("raid"..self.ScanIndex, name)
+                local unit = "raid"..self.ScanIndex
+                self:ScanUnit(unit, name)
+                
+                -- Check for pet (Paladin module cares about pets)
+                local petUnit = "raidpet"..self.ScanIndex
+                if UnitExists(petUnit) then
+                    self:ScanUnit(petUnit, UnitName(petUnit))
+                end
+                
                 count = count + 1
             end
             self.ScanIndex = self.ScanIndex + 1
@@ -689,9 +703,16 @@ function Paladin:ScanStep()
         if self.ScanIndex > (numParty + 1) then self.ScanIndex = 1 end
         if self.ScanIndex == 1 then
             self:ScanUnit("player", UnitName("player"))
+            if UnitExists("pet") then self:ScanUnit("pet", UnitName("pet")) end
         else
             local idx = self.ScanIndex - 1
-            self:ScanUnit("party"..idx, UnitName("party"..idx))
+            local unit = "party"..idx
+            local name = UnitName(unit)
+            if name then
+                self:ScanUnit(unit, name)
+                local petUnit = "partypet"..idx
+                if UnitExists(petUnit) then self:ScanUnit(petUnit, UnitName(petUnit)) end
+            end
         end
         self.ScanIndex = self.ScanIndex + 1
     end
@@ -877,6 +898,16 @@ function Paladin:AutoAssign()
             end
         end
         ClassPower_SendMessage("PASSIGNS "..paladinName.." "..assignStr)
+        
+        -- PallyPower compatibility: Send individual ASSIGN messages
+        if ClassPower_PerUser.PallyPowerCompat then
+            local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+            for classID = 0, 9 do
+                local bID = assigns[classID]
+                if bID == nil then bID = -1 end
+                SendAddonMessage("PLPWR", "ASSIGN "..paladinName.." "..classID.." "..bID, msgType)
+            end
+        end
     end
     
     -- Report
@@ -1164,6 +1195,12 @@ function Paladin:CycleBlessingForward(paladinName, classID)
     
     self.Assignments[paladinName][classID] = cur
     ClassPower_SendMessage("PASSIGN "..paladinName.." "..classID.." "..cur)
+    
+    if ClassPower_PerUser.PallyPowerCompat then
+        local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+        SendAddonMessage("PLPWR", "ASSIGN "..paladinName.." "..classID.." "..cur, msgType)
+    end
+    
     self:UpdateUI()
     
     -- Save if this is for the current player
@@ -1200,6 +1237,11 @@ function Paladin:CycleBlessingForwardAllClasses(paladinName, referenceClassID)
     for classID = 0, 9 do
         self.Assignments[paladinName][classID] = newBlessing
         ClassPower_SendMessage("PASSIGN "..paladinName.." "..classID.." "..newBlessing)
+    end
+    
+    if ClassPower_PerUser.PallyPowerCompat then
+        local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+        SendAddonMessage("PLPWR", "MASSIGN "..paladinName.." "..newBlessing, msgType)
     end
     
     if newBlessing >= 0 then
@@ -1268,7 +1310,7 @@ function Paladin:CreateBuffBar()
         end
     end)
     
-    local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
+    local grip = ClassPower_CreateResizeGrip(f, f:GetName().."ResizeGrip")
     grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
     grip:SetScript("OnMouseUp", function()
         local p = this:GetParent()
@@ -1282,16 +1324,16 @@ function Paladin:CreateBuffBar()
         row:Hide()
     end
     
-    if CP_PerUser.PaladinPoint then
+    if ClassPower_PerUser.PaladinPoint then
         f:ClearAllPoints()
-        f:SetPoint(CP_PerUser.PaladinPoint, "UIParent", CP_PerUser.PaladinRelativePoint or "CENTER", 
-                   CP_PerUser.PaladinX or 0, CP_PerUser.PaladinY or 0)
+        f:SetPoint(ClassPower_PerUser.PaladinPoint, "UIParent", ClassPower_PerUser.PaladinRelativePoint or "CENTER", 
+                   ClassPower_PerUser.PaladinX or 0, ClassPower_PerUser.PaladinY or 0)
     else
         f:SetPoint("CENTER", 0, 0)
     end
     
-    if CP_PerUser.PaladinScale then
-        f:SetScale(CP_PerUser.PaladinScale)
+    if ClassPower_PerUser.PaladinScale then
+        f:SetScale(ClassPower_PerUser.PaladinScale)
     else
         f:SetScale(0.7)
     end
@@ -1336,16 +1378,16 @@ end
 function Paladin:SaveBuffBarPosition()
     if not self.BuffBar then return end
     local point, _, relativePoint, x, y = self.BuffBar:GetPoint()
-    CP_PerUser.PaladinPoint = point
-    CP_PerUser.PaladinRelativePoint = relativePoint
-    CP_PerUser.PaladinX = x
-    CP_PerUser.PaladinY = y
-    CP_PerUser.PaladinScale = self.BuffBar:GetScale()
+    ClassPower_PerUser.PaladinPoint = point
+    ClassPower_PerUser.PaladinRelativePoint = relativePoint
+    ClassPower_PerUser.PaladinX = x
+    ClassPower_PerUser.PaladinY = y
+    ClassPower_PerUser.PaladinScale = self.BuffBar:GetScale()
 end
 
 function Paladin:SaveConfigPosition()
     if not self.ConfigWindow then return end
-    CP_PerUser.PaladinConfigScale = self.ConfigWindow:GetScale()
+    ClassPower_PerUser.PaladinConfigScale = self.ConfigWindow:GetScale()
 end
 
 function Paladin:UpdateBuffBar()
@@ -1551,7 +1593,7 @@ function Paladin:CreateConfigWindow()
     f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
     
     -- Add resize grip for scaling
-    local grip = CP_CreateResizeGrip(f, f:GetName().."ResizeGrip")
+    local grip = ClassPower_CreateResizeGrip(f, f:GetName().."ResizeGrip")
     grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
     grip:SetScript("OnMouseUp", function()
         local p = this:GetParent()
@@ -1607,8 +1649,8 @@ function Paladin:CreateConfigWindow()
     end
     
     -- Apply saved scale
-    if CP_PerUser.PaladinConfigScale then
-        f:SetScale(CP_PerUser.PaladinConfigScale)
+    if ClassPower_PerUser.PaladinConfigScale then
+        f:SetScale(ClassPower_PerUser.PaladinConfigScale)
     else
         f:SetScale(1.0)
     end
@@ -1620,14 +1662,42 @@ function Paladin:CreateConfigWindow()
     btnSettings:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 15)
     btnSettings:SetText("Settings...")
     btnSettings:SetScript("OnClick", function()
-        CP_ShowSettingsPanel()
+        ClassPower_ShowSettingsPanel()
     end)
+    
+    -- PallyPower Compatibility Checkbox
+    local chkPP = CreateFrame("CheckButton", "CPPaladinPPCompat", f, "UICheckButtonTemplate")
+    chkPP:SetWidth(24); chkPP:SetHeight(24)
+    chkPP:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
+    local chkLabel = chkPP:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    chkLabel:SetPoint("LEFT", chkPP, "RIGHT", 2, 1)
+    chkLabel:SetText("Link PallyPower")
+    
+    chkPP:SetScript("OnShow", function()
+        this:SetChecked(ClassPower_PerUser.PallyPowerCompat)
+    end)
+    chkPP:SetScript("OnClick", function()
+        if this:GetChecked() then
+            ClassPower_PerUser.PallyPowerCompat = true
+            Paladin:RequestPallyPowerSync()
+        else
+            ClassPower_PerUser.PallyPowerCompat = false
+        end
+    end)
+    chkPP:SetScript("OnEnter", function()
+         GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+         GameTooltip:SetText("PallyPower Compatibility")
+         GameTooltip:AddLine("Enables two-way communication with PallyPower.", 0.7, 0.7, 0.7)
+         GameTooltip:AddLine("Useful if other paladins are using PallyPower.", 0.7, 0.7, 0.7)
+         GameTooltip:Show()
+    end)
+    chkPP:SetScript("OnLeave", function() GameTooltip:Hide() end)
     
     -- Auto-Assign button (only visible for leaders/assists)
     local autoBtn = CreateFrame("Button", f:GetName().."AutoAssignBtn", f, "UIPanelButtonTemplate")
     autoBtn:SetWidth(90)
     autoBtn:SetHeight(24)
-    autoBtn:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
+    autoBtn:SetPoint("LEFT", chkPP, "RIGHT", 105, 0)
     autoBtn:SetText("Auto-Assign")
     autoBtn:SetScript("OnClick", function()
         Paladin:AutoAssign()
@@ -1693,7 +1763,7 @@ function Paladin:CreateConfigRow(parent, rowIndex)
     row:SetHeight(60)  -- Height for name + capability icons + class buttons
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 15, -65 - (rowIndex-1)*62)
     
-    local clearBtn = CP_CreateClearButton(row, rowName.."Clear")
+    local clearBtn = ClassPower_CreateClearButton(row, rowName.."Clear")
     clearBtn:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -4)
     clearBtn:SetScript("OnClick", function() Paladin:ClearButton_OnClick(this) end)
     
@@ -2008,6 +2078,10 @@ function Paladin:ClearButton_OnClick(btn)
     self.JudgementAssignments[paladinName] = nil
     
     ClassPower_SendMessage("PCLEAR "..paladinName)
+    if ClassPower_PerUser.PallyPowerCompat then
+        local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+        SendAddonMessage("PLPWR", "MASSIGN "..paladinName.." -1", msgType)
+    end
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00ClassPower|r: Cleared all assignments for "..paladinName)
     
     self:UpdateConfigGrid()
@@ -2034,6 +2108,10 @@ function Paladin:ClassButton_OnClick(btn)
         self.Assignments[paladinName] = self.Assignments[paladinName] or {}
         self.Assignments[paladinName][classID] = -1
         ClassPower_SendMessage("PASSIGN "..paladinName.." "..classID.." -1")
+        if ClassPower_PerUser.PallyPowerCompat then
+            local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+            SendAddonMessage("PLPWR", "ASSIGN "..paladinName.." "..classID.." -1", msgType)
+        end
         self:UpdateUI()
     elseif IsShiftKeyDown() then
         self:CycleBlessingForwardAllClasses(paladinName, classID)
@@ -2261,8 +2339,8 @@ function Paladin:UpdateBuffBar()
     local pname = UnitName("player")
     local assigns = self.Assignments[pname] or {}
     
-    local displayMode = CP_PerUser.BuffDisplayMode or "missing"
-    local thresholdSeconds = ((CP_PerUser.TimerThresholdMinutes or 5) * 60) + (CP_PerUser.TimerThresholdSeconds or 0)
+    local displayMode = ClassPower_PerUser.BuffDisplayMode or "missing"
+    local thresholdSeconds = ((ClassPower_PerUser.TimerThresholdMinutes or 5) * 60) + (ClassPower_PerUser.TimerThresholdSeconds or 0)
     
     local maxRowWidth = 120 -- Start smaller to allow shrinking, but keep minimum
     local lastRow = nil
@@ -2319,11 +2397,11 @@ function Paladin:UpdateBuffBar()
                     -- Update Text
                     if displayMode == "always" or displayMode == "timer" then
                          if minTime and minTime > 0 and missing == 0 then
-                              text:SetText(CP_FormatTime(minTime))
+                              text:SetText(ClassPower_FormatTime(minTime))
                               text:SetTextColor(0, 1, 0)
                          elseif missing > 0 then
                               if minTime and minTime > 0 then
-                                   text:SetText(missing.." ("..CP_FormatTime(minTime)..")")
+                                   text:SetText(missing.." ("..ClassPower_FormatTime(minTime)..")")
                               else
                                    text:SetText(missing.."/"..total)
                               end
@@ -2403,12 +2481,12 @@ function Paladin:UpdateLeaderButtons()
 end
 
 function Paladin:ResetUI()
-    CP_PerUser.PaladinPoint = nil
-    CP_PerUser.PaladinRelativePoint = nil
-    CP_PerUser.PaladinX = nil
-    CP_PerUser.PaladinY = nil
-    CP_PerUser.PaladinScale = 0.7
-    CP_PerUser.PaladinConfigScale = 1.0
+    ClassPower_PerUser.PaladinPoint = nil
+    ClassPower_PerUser.PaladinRelativePoint = nil
+    ClassPower_PerUser.PaladinX = nil
+    ClassPower_PerUser.PaladinY = nil
+    ClassPower_PerUser.PaladinScale = 0.7
+    ClassPower_PerUser.PaladinConfigScale = 1.0
     
     if self.BuffBar then
         self.BuffBar:ClearAllPoints()
@@ -2463,16 +2541,16 @@ function Paladin:SaveAssignments()
     if not pname then return end
     
     -- Initialize saved variable if needed
-    if not CP_PaladinAssignments then
-        CP_PaladinAssignments = {}
+    if not ClassPower_PaladinAssignments then
+        ClassPower_PaladinAssignments = {}
     end
     
     -- Save current player's assignments
-    CP_PaladinAssignments.Assignments = self.Assignments[pname] or {}
-    CP_PaladinAssignments.AuraAssignment = self.AuraAssignments[pname]
-    CP_PaladinAssignments.JudgementAssignment = self.JudgementAssignments[pname]
+    ClassPower_PaladinAssignments.Assignments = self.Assignments[pname] or {}
+    ClassPower_PaladinAssignments.AuraAssignment = self.AuraAssignments[pname]
+    ClassPower_PaladinAssignments.JudgementAssignment = self.JudgementAssignments[pname]
     
-    CP_Debug("Paladin: Saved assignments for "..pname)
+    ClassPower_Debug("Paladin: Saved assignments for "..pname)
 end
 
 function Paladin:LoadAssignments()
@@ -2480,36 +2558,205 @@ function Paladin:LoadAssignments()
     if not pname then return end
     
     -- Check if we have saved data
-    if not CP_PaladinAssignments then
-        CP_Debug("Paladin: No saved assignments found")
+    if not ClassPower_PaladinAssignments then
+        ClassPower_Debug("Paladin: No saved assignments found")
         return
     end
     
     -- Load assignments for current player
-    if CP_PaladinAssignments.Assignments then
+    if ClassPower_PaladinAssignments.Assignments then
         self.Assignments[pname] = {}
         for classID = 0, 9 do
-            local bid = CP_PaladinAssignments.Assignments[classID]
+            local bid = ClassPower_PaladinAssignments.Assignments[classID]
             if bid ~= nil then
                 self.Assignments[pname][classID] = bid
             else
                 self.Assignments[pname][classID] = -1
             end
         end
-        CP_Debug("Paladin: Loaded blessing assignments")
+        ClassPower_Debug("Paladin: Loaded blessing assignments")
     end
     
-    if CP_PaladinAssignments.AuraAssignment ~= nil then
-        self.AuraAssignments[pname] = CP_PaladinAssignments.AuraAssignment
-        CP_Debug("Paladin: Loaded aura assignment: "..tostring(CP_PaladinAssignments.AuraAssignment))
+    if ClassPower_PaladinAssignments.AuraAssignment ~= nil then
+        self.AuraAssignments[pname] = ClassPower_PaladinAssignments.AuraAssignment
+        ClassPower_Debug("Paladin: Loaded aura assignment: "..tostring(ClassPower_PaladinAssignments.AuraAssignment))
     end
     
-    if CP_PaladinAssignments.JudgementAssignment ~= nil then
-        self.JudgementAssignments[pname] = CP_PaladinAssignments.JudgementAssignment
-        CP_Debug("Paladin: Loaded judgement assignment: "..tostring(CP_PaladinAssignments.JudgementAssignment))
+    if ClassPower_PaladinAssignments.JudgementAssignment ~= nil then
+        self.JudgementAssignments[pname] = ClassPower_PaladinAssignments.JudgementAssignment
+        ClassPower_Debug("Paladin: Loaded judgement assignment: "..tostring(ClassPower_PaladinAssignments.JudgementAssignment))
     end
 end
 
+-----------------------------------------------------------------------------------
+-- PallyPower Compatibility
+-----------------------------------------------------------------------------------
+
+function Paladin:RequestPallyPowerSync()
+    if not ClassPower_PerUser.PallyPowerCompat then return end
+    if GetNumRaidMembers() > 0 then
+        SendAddonMessage("PLPWR", "REQ", "RAID")
+    elseif GetNumPartyMembers() > 0 then
+        SendAddonMessage("PLPWR", "REQ", "PARTY")
+    end
+end
+
+function Paladin:SendPallyPowerSelf()
+    if not ClassPower_PerUser.PallyPowerCompat then return end
+    
+    local pname = UnitName("player")
+    local msg = "SELF "
+    
+    -- Part 1: Ranks (2 chars per blessing 0-5: Rank + Talent)
+    local rInfo = self.RankInfo or {}
+    for id = 0, 5 do
+        if rInfo[id] then
+            msg = msg .. rInfo[id].rank .. rInfo[id].talent
+        else
+            msg = msg .. "nn"
+        end
+    end
+    
+    msg = msg .. "@"
+    
+    -- Part 2: Assignments (1 char per class 0-9)
+    local assigns = self.Assignments[pname] or {}
+    for classID = 0, 9 do
+        local bid = assigns[classID]
+        if bid and bid >= 0 then
+            msg = msg .. bid
+        else
+            msg = msg .. "n"
+        end
+    end
+    
+    -- Send SELF
+    if GetNumRaidMembers() > 0 then
+        SendAddonMessage("PLPWR", msg, "RAID")
+        SendAddonMessage("PLPWR", "SYMCOUNT "..self.SymbolCount, "RAID")
+    elseif GetNumPartyMembers() > 0 then
+        SendAddonMessage("PLPWR", msg, "PARTY")
+        SendAddonMessage("PLPWR", "SYMCOUNT "..self.SymbolCount, "PARTY")
+    end
+end
+
+function Paladin:OnPallyPowerMessage(sender, msg, channel)
+    if not ClassPower_PerUser.PallyPowerCompat then return end
+    if sender == UnitName("player") then return end -- Ignore self
+    
+    -- REQ: Reply with SELF
+    if msg == "REQ" then
+        self:SendPallyPowerSelf()
+        return
+    end
+    
+    -- SELF: Update roster info for that sender
+    if string.find(msg, "^SELF") then
+        local _, _, nums, assignStr = string.find(msg, "SELF ([0-9n]*)@?([0-9n]*)")
+        if nums then
+            -- Parse ranks/talents
+            local info = {}
+            for id = 0, 5 do
+                local rank = string.sub(nums, id*2+1, id*2+1)
+                local talent = string.sub(nums, id*2+2, id*2+2)
+                
+                if rank ~= "n" then
+                    info[id] = {
+                        rank = tonumber(rank) or 0,
+                        talent = tonumber(talent) or 0
+                    }
+                end
+            end
+            self.AllPaladins[sender] = info -- Merge/Overwrite
+            
+            -- Parse Assignments if present
+            if assignStr and assignStr ~= "" then
+                self.Assignments[sender] = self.Assignments[sender] or {}
+                for id = 0, 9 do
+                     local char = string.sub(assignStr, id+1, id+1)
+                     if char == "n" or char == "" then
+                         self.Assignments[sender][id] = -1
+                     else
+                         self.Assignments[sender][id] = tonumber(char) or -1
+                     end
+                end
+            end
+            
+            self:UpdateUI()
+        end
+        return
+    end
+    
+    -- ASSIGN: Update specific assignment
+    -- Format: ASSIGN <name> <class> <skill>
+    if string.find(msg, "^ASSIGN") then
+        local _, _, name, classID, skillID = string.find(msg, "^ASSIGN (.*) (.*) (.*)")
+        if name and classID and skillID then
+            name = name
+            classID = tonumber(classID)
+            skillID = tonumber(skillID)
+            
+            -- Only accept if from leader/promoted OR if self-assigned (though sender != self here)
+            -- Matches PallyPower logic: anyone can assign themselves? No, usually leader control.
+            -- Using ClassPower_IsPromoted helper or just accepting it to keep sync.
+            -- PallyPower checks PallyPower_CheckRaidLeader(sender) OR (name == sender).
+            
+            if ClassPower_IsPromoted(sender) or name == sender then
+                self.Assignments[name] = self.Assignments[name] or {}
+                self.Assignments[name][classID] = skillID
+                ClassPower_Debug("PP Sync: "..name.." assigned skill "..skillID.." for class "..classID)
+                self:UpdateUI()
+            end
+        end
+        return
+    end
+    
+    -- MASSIGN: Mass assign for one paladin
+    -- Format: MASSIGN <name> <skill>
+    if string.find(msg, "^MASSIGN") then
+         local _, _, name, skillID = string.find(msg, "^MASSIGN (.*) (.*)")
+         if name and skillID then
+             skillID = tonumber(skillID)
+             if ClassPower_IsPromoted(sender) or name == sender then
+                 self.Assignments[name] = self.Assignments[name] or {}
+                 for c = 0, 9 do
+                     self.Assignments[name][c] = skillID
+                 end
+                 self:UpdateUI()
+             end
+         end
+         return
+    end
+    
+    -- SYMCOUNT
+    if string.find(msg, "^SYMCOUNT") then
+        -- We don't track other people's symbol counts currently in ClassPower UI, but typically PP stores it.
+        -- We can ignore it for now or store it if we add a column later.
+        return
+    end
+    
+    -- CLEAR
+    if string.find(msg, "^CLEAR") then
+        local _, _, who = string.find(msg, "^CLEAR (.*)") -- Wait, PP implementation of CLEAR might be just "CLEAR" or "CLEAR"
+        -- PP code: PallyPower_SendMessage("CLEAR")
+        -- PP Parse: if string.find(msg, "^CLEAR") then PallyPower_Clear(true, sender)
+        
+        if ClassPower_IsPromoted(sender) then
+            -- Clear all assignments? Or just sender's?
+            -- PallyPower CLEAR usually implies resetting the roster assignments.
+            -- Since this is destructive, be careful.
+            -- "PallyPower_Clear(true, sender)" in PP clears EVERYONE if sender is leader.
+            -- Let's replicate that behavior.
+            
+             for n, _ in pairs(self.Assignments) do
+                 self.Assignments[n] = {}
+                 for i=0,9 do self.Assignments[n][i] = -1 end
+             end
+             self:UpdateUI()
+             ClassPower_Debug("PP Sync: Config cleared by "..sender)
+        end
+    end
+end
 -----------------------------------------------------------------------------------
 -- Register Module
 -----------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-PriestPower_ClassID = {
+ClassPower_ClassID = {
     [0] = "Warrior",
     [1] = "Rogue",
     [2] = "Priest",
@@ -11,21 +11,21 @@ PriestPower_ClassID = {
     [9] = "Pet",
 }
 
-PriestPower_BuffID = {
+ClassPower_BuffID = {
     [0] = "Fortitude",
     [1] = "Spirit",
     [2] = "Shadow Protection",
     [3] = "Proclaim Champion",
 }
 
-PriestPower_BuffIcon = {
+ClassPower_BuffIcon = {
     [0] = "Interface\\Icons\\Spell_Holy_WordFortitude",
     [1] = "Interface\\Icons\\Spell_Holy_DivineSpirit",
     [2] = "Interface\\Icons\\Spell_Shadow_AntiShadow",
     [3] = "Interface\\Icons\\Spell_Holy_ProclaimChampion",
 }
 
-PriestPower_BuffIconGroup = {
+ClassPower_BuffIconGroup = {
     [0] = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude",
     [1] = "Interface\\Icons\\Spell_Holy_PrayerOfSpirit",
     [2] = "Interface\\Icons\\Spell_Holy_PrayerOfShadowProtection",
@@ -44,6 +44,6 @@ SPELL_EMPOWER = "Empower Champion"
 SPELL_REVIVE = "Revive Champion"
 SPELL_ENLIGHTEN = "Enlighten"
 
-PriestPower_Credits1 = "Created by User"
-PriestPower_Credits2 = "Based on PallyPower by Relar"
-PriestPower_Credits3 = "Adapted for Turtle WoW"
+ClassPower_Credits1 = "Created by User"
+ClassPower_Credits2 = "Based on PallyPower by Relar"
+ClassPower_Credits3 = "Adapted for Turtle WoW"

@@ -1,9 +1,9 @@
 ## Interface: 11200
-## Title: ClassPower (PriestPower)
+## Title: ClassPower
 ## Notes: Class buff management for Turtle WoW (1.12.1) - Priest, Druid, Mage, Shaman, Paladin
 ## Author: Slimewizzard
 ## Version: 2.0
-## SavedVariablesPerCharacter: CP_PerUser, PriestPower_Assignments, PriestPower_LegacyAssignments, PP_BuffTimers, PP_PerUser, CP_PaladinAssignments, CP_DruidAssignments, ClassPower_TankList
+## SavedVariablesPerCharacter: ClassPower_PerUser, ClassPower_Assignments, ClassPower_LegacyAssignments, ClassPower_PaladinAssignments, ClassPower_DruidAssignments, ClassPower_TankList
 
 ClassPower_Core.lua
 modules\priest.lua
