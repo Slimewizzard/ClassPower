@@ -898,6 +898,16 @@ function Paladin:AutoAssign()
             end
         end
         ClassPower_SendMessage("PASSIGNS "..paladinName.." "..assignStr)
+        
+        -- PallyPower compatibility: Send individual ASSIGN messages
+        if ClassPower_PerUser.PallyPowerCompat then
+            local msgType = (GetNumRaidMembers() > 0) and "RAID" or "PARTY"
+            for classID = 0, 9 do
+                local bID = assigns[classID]
+                if bID == nil then bID = -1 end
+                SendAddonMessage("PLPWR", "ASSIGN "..paladinName.." "..classID.." "..bID, msgType)
+            end
+        end
     end
     
     -- Report
@@ -1658,7 +1668,7 @@ function Paladin:CreateConfigWindow()
     -- PallyPower Compatibility Checkbox
     local chkPP = CreateFrame("CheckButton", "CPPaladinPPCompat", f, "UICheckButtonTemplate")
     chkPP:SetWidth(24); chkPP:SetHeight(24)
-    chkPP:SetPoint("LEFT", btnSettings, "RIGHT", 15, 0)
+    chkPP:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
     local chkLabel = chkPP:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     chkLabel:SetPoint("LEFT", chkPP, "RIGHT", 2, 1)
     chkLabel:SetText("Link PallyPower")
@@ -1687,7 +1697,7 @@ function Paladin:CreateConfigWindow()
     local autoBtn = CreateFrame("Button", f:GetName().."AutoAssignBtn", f, "UIPanelButtonTemplate")
     autoBtn:SetWidth(90)
     autoBtn:SetHeight(24)
-    autoBtn:SetPoint("LEFT", btnSettings, "RIGHT", 10, 0)
+    autoBtn:SetPoint("LEFT", chkPP, "RIGHT", 105, 0)
     autoBtn:SetText("Auto-Assign")
     autoBtn:SetScript("OnClick", function()
         Paladin:AutoAssign()
