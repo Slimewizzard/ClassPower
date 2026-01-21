@@ -223,6 +223,19 @@ function Druid:OnUpdate(elapsed)
         refreshInterval = 1.0  -- 1 second for timer modes
     end
     
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
+    end
+    
     -- UI refresh
     self.UpdateTimer = self.UpdateTimer - elapsed
     if self.UpdateTimer <= 0 then
@@ -242,13 +255,6 @@ function Druid:OnUpdate(elapsed)
             self:ScanRaid()
             self:UpdateUI()
         end
-    -- Also update immediately if dirty flag is set and UI is visible
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
-            self:UpdateUI()
-        end
     end
     
     -- Background distributed scanning
@@ -262,11 +268,9 @@ end
 function Druid:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        -- Only trigger a partial scan for this unit
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    elseif event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
+    -- Removed UNIT_AURA scanning (Polling Mode)
+    
+    if event == "UNIT_MANA" or event == "UNIT_MAXMANA" then
         -- Only trigger UI update if this is our Innervate target
         local pname = UnitName("player")
         local target = self.LegacyAssignments[pname] and self.LegacyAssignments[pname]["Innervate"]
@@ -598,8 +602,10 @@ function Druid:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then

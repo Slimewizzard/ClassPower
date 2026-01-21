@@ -283,10 +283,7 @@ end
 function Paladin:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    end
+    -- Removed UNIT_AURA scanning (Polling Mode)
 end
 
 function Paladin:OnEvent(event)
@@ -340,6 +337,19 @@ function Paladin:OnUpdate(elapsed)
         end
     end
     
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
+    end
+    
     -- UI refresh (1s interval if timers shown, else 5s)
     self.UpdateTimer = self.UpdateTimer - elapsed
     if self.UpdateTimer <= 0 then
@@ -360,12 +370,6 @@ function Paladin:OnUpdate(elapsed)
         
         if needsScan then
             self:ScanRaid()
-            self:UpdateUI()
-        end
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
             self:UpdateUI()
         end
     end
@@ -674,12 +678,22 @@ function Paladin:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then
-                self:ScanUnit("raid"..self.ScanIndex, name)
+                local unit = "raid"..self.ScanIndex
+                self:ScanUnit(unit, name)
+                
+                -- Check for pet (Paladin module cares about pets)
+                local petUnit = "raidpet"..self.ScanIndex
+                if UnitExists(petUnit) then
+                    self:ScanUnit(petUnit, UnitName(petUnit))
+                end
+                
                 count = count + 1
             end
             self.ScanIndex = self.ScanIndex + 1
@@ -689,9 +703,16 @@ function Paladin:ScanStep()
         if self.ScanIndex > (numParty + 1) then self.ScanIndex = 1 end
         if self.ScanIndex == 1 then
             self:ScanUnit("player", UnitName("player"))
+            if UnitExists("pet") then self:ScanUnit("pet", UnitName("pet")) end
         else
             local idx = self.ScanIndex - 1
-            self:ScanUnit("party"..idx, UnitName("party"..idx))
+            local unit = "party"..idx
+            local name = UnitName(unit)
+            if name then
+                self:ScanUnit(unit, name)
+                local petUnit = "partypet"..idx
+                if UnitExists(petUnit) then self:ScanUnit(petUnit, UnitName(petUnit)) end
+            end
         end
         self.ScanIndex = self.ScanIndex + 1
     end

@@ -409,18 +409,24 @@ function ClassPower_OnUpdate(elapsed)
         end
     end
     
-    -- Also check other loaded modules with visible config windows (for admin panel)
-    for classToken, loaded in pairs(ClassPower.loadedModules) do
-        if loaded then
-            local module = ClassPower.modules[classToken]
-            -- Skip the active module (already handled above)
-            if module and module ~= ClassPower.activeModule then
-                -- If this module has a visible config window and UIDirty is set, update it
-                if module.ConfigWindow and module.ConfigWindow:IsVisible() then
-                    if module.UIDirty then
-                        module.UIDirty = false
-                        if module.UpdateConfigGrid then
-                            module:UpdateConfigGrid()
+    -- Global UI Throttle for background modules
+    ClassPower.UIThrottle = (ClassPower.UIThrottle or 0) - elapsed
+    if ClassPower.UIThrottle <= 0 then
+        ClassPower.UIThrottle = 1.0 -- 1fps update for background windows
+        
+        -- Also check other loaded modules with visible config windows (for admin panel)
+        for classToken, loaded in pairs(ClassPower.loadedModules) do
+            if loaded then
+                local module = ClassPower.modules[classToken]
+                -- Skip the active module (handled by its own OnUpdate)
+                if module and module ~= ClassPower.activeModule then
+                    -- If this module has a visible config window and UIDirty is set, update it
+                    if module.ConfigWindow and module.ConfigWindow:IsVisible() then
+                        if module.UIDirty then
+                            module.UIDirty = false
+                            if module.UpdateConfigGrid then
+                                module:UpdateConfigGrid()
+                            end
                         end
                     end
                 end

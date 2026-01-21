@@ -246,7 +246,20 @@ function Priest:OnUpdate(elapsed)
         end
     end
     
-    -- UI refresh (1s interval if timers shown, else 5s)
+    -- Throttled UI Updates
+    self.ThrottleTimer = (self.ThrottleTimer or 0) - elapsed
+    if self.ThrottleTimer <= 0 then
+        if self.UIDirty then
+            self.UIDirty = false
+            if (self.BuffBar and self.BuffBar:IsVisible()) or 
+               (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
+                self:UpdateUI()
+            end
+        end
+        self.ThrottleTimer = 1.0 -- Reset timer (max 1 update/sec)
+    end
+    
+    -- Periodic full scan/refresh (keep timers optimized)
     self.UpdateTimer = self.UpdateTimer - elapsed
     if self.UpdateTimer <= 0 then
         local displayMode = ClassPower_PerUser.BuffDisplayMode
@@ -269,13 +282,6 @@ function Priest:OnUpdate(elapsed)
             self:ScanRaid()
             self:UpdateUI()
         end
-    -- Also update immediately if dirty flag is set and UI is visible
-    elseif self.UIDirty then
-        self.UIDirty = false
-        if (self.BuffBar and self.BuffBar:IsVisible()) or 
-           (self.ConfigWindow and self.ConfigWindow:IsVisible()) then
-            self:UpdateUI()
-        end
     end
     
     -- Background distributed scanning
@@ -289,11 +295,7 @@ end
 function Priest:OnUnitUpdate(unit, name, event)
     if not name then return end
     
-    if event == "UNIT_AURA" then
-        -- Only trigger a partial scan for this unit
-        self:ScanUnit(unit, name)
-        self.UIDirty = true
-    end
+    -- Removed UNIT_AURA scanning (Polling Mode)
 end
 
 function Priest:OnSlashCommand(msg)
@@ -602,8 +604,10 @@ function Priest:ScanStep()
     local numParty = GetNumPartyMembers()
     
     local count = 0
+    local stepSize = ClassPower_PerUser.scanperframe or 1
+    
     if numRaid > 0 then
-        while count < self.ScanStepSize do
+        while count < stepSize do
             if self.ScanIndex > numRaid then self.ScanIndex = 1 end
             local name = GetRaidRosterInfo(self.ScanIndex)
             if name then
