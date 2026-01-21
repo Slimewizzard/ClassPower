@@ -854,6 +854,7 @@ function Paladin:AutoAssign()
     local classesSatisfied = {}
 
     -- Assign blessings in priority order
+    -- Each paladin gets ONE blessing type and applies it to all applicable classes
     for _, bID in ipairs(priorityOrder) do
         -- Special handling for Might/Wisdom overlap on hybrids
         local preferImproved = (bID == 0 or bID == 1) -- Prefer improved for Might/Wisdom
@@ -863,9 +864,9 @@ function Paladin:AutoAssign()
             usedPaladins[paladin.name] = true
             blessingAssignments[bID] = paladin.name
             
-            -- Assign this blessing to all classes that need it
+            -- Assign this blessing to all classes that need it (for THIS paladin)
             for classID = 0, 9 do
-                if classesPresent[classID] and not classesSatisfied[classID] then
+                if classesPresent[classID] then
                     local needs = self.ClassBlessingNeeds[classID]
                     -- Skip Salvation if class is all tanks
                     local skipSalvation = (bID == 2 and classSkipsSalvation[classID])
@@ -879,7 +880,6 @@ function Paladin:AutoAssign()
                     
                     if needs and needs[bID] and not skipSalvation and not skipForTank then
                         self.Assignments[paladin.name][classID] = bID
-                        classesSatisfied[classID] = true
                     end
                 end
             end
